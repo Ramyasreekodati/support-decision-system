@@ -1,5 +1,6 @@
 ﻿import os
 import json
+import math
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -24,6 +25,20 @@ if env_path.exists():
     except Exception:
         pass
 
+def sanitize_for_json(obj: Any) -> Any:
+    """Recursively convert float('nan'), float('inf'), and non-serializable objects to None."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(v) for v in obj]
+    elif hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    return obj
+
 @dataclass
 class ToolCall:
     id: str
@@ -42,7 +57,7 @@ class LLMProvider(ABC):
         pass
 
 class GeminiProvider(LLMProvider):
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-3.6-flash"):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         if not self.api_key:
             try:
@@ -89,17 +104,24 @@ class GeminiProvider(LLMProvider):
                         parts.append({
                             "functionCall": {
                                 "name": tc["name"],
-                                "args": tc["args"]
+                                "args": sanitize_for_json(tc["args"])
                             }
                         })
                 contents.append({"role": "model", "parts": parts})
             elif role == "tool":
+                clean_response = sanitize_for_json(m["content"])
+                if isinstance(clean_response, str):
+                    try:
+                        clean_response = json.loads(clean_response)
+                        clean_response = sanitize_for_json(clean_response)
+                    except Exception:
+                        pass
                 contents.append({
                     "role": "function",
                     "parts": [{
                         "functionResponse": {
                             "name": m["name"],
-                            "response": json.loads(m["content"]) if isinstance(m["content"], str) else m["content"]
+                            "response": clean_response if isinstance(clean_response, dict) else {"result": clean_response}
                         }
                     }]
                 })
@@ -119,6 +141,8 @@ class GeminiProvider(LLMProvider):
                     "mode": "AUTO"
                 }
             }
+
+        payload = sanitize_for_json(payload)
 
         headers = {"Content-Type": "application/json"}
         params = {"key": self.api_key}

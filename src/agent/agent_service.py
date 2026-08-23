@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 import re
 from typing import Dict, Any, List, Optional
@@ -375,8 +375,13 @@ class AgentService:
 
     def process_message_structured(self, message: str, context: SecurityContext, chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         if self.is_live_mode:
-            logger.info("Executing via LiveToolCallingAgent (Gemini)")
-            return self.live_agent.execute_turn(message, context, chat_history=chat_history)
+            try:
+                logger.info("Executing via LiveToolCallingAgent (Gemini 3.6-flash)")
+                return self.live_agent.execute_turn(message, context, chat_history=chat_history)
+            except Exception as e:
+                logger.warning(f"Live Gemini Agent error: {e}. Gracefully falling back to deterministic engine.")
+                res = self.offline_engine.execute_turn(message, context, chat_history=chat_history)
+                return res
         else:
             logger.info("Executing via DeterministicToolEngine (Offline Mode)")
             return self.offline_engine.execute_turn(message, context, chat_history=chat_history)
