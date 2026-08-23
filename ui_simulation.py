@@ -8,8 +8,8 @@ from src.phase4 import DocumentStore, OperationalDataStore, ActionGateway
 print("\n=== MANUAL UI TEST SIMULATION ===")
 
 # Streamlit Backend Emulation
-snapshot = IST.localize(datetime(2026, 8, 16, 11, 0))
 data = OperationalDataStore(pathlib.Path(__file__).resolve().parent / "ParcelPilot_Assessment_Data.xlsx")
+snapshot = data.get_snapshot_time()  # dynamic — same source as app.py
 docs = DocumentStore()
 gateway = ActionGateway(data, docs, None)
 agent = AgentOrchestrator(data, docs, gateway)
@@ -26,7 +26,19 @@ def simulate_ui_chat(prompt, context):
         structured = {"Text": "UNAUTHORIZED: You do not have permission to access this record."}
         
     print("[Agent]")
-    print(structured)
+    
+    # Assert required fields
+    if "Decision" in structured or "Error" in structured:
+        assert "tool_trace" in structured, "FAIL: tool_trace missing from structured response"
+        print(f"  tool_trace: {[s['tool'] for s in structured['tool_trace']]}")
+        
+        if "Evidence" in structured:
+            for e in structured["Evidence"]:
+                if isinstance(e, dict):
+                    assert "authority" in e, f"FAIL: authority missing from evidence item {e}"
+            print(f"  evidence: {[e.get('source','?') for e in structured['Evidence']]}")
+    
+    print(f"  Decision: {structured.get('Decision', structured.get('Error', structured.get('Text', '?')))}")
     
     action = structured.get("Action")
     if action and action.get("status") == "PREPARED":
@@ -36,8 +48,9 @@ def simulate_ui_chat(prompt, context):
     return None
 
 # A. Northstar cancellation
-print("\n--- SCENARIO A: Normal ---")
-simulate_ui_chat("Can I cancel ORD-1001?", admin_ctx)
+print("\n--- SCENARIO A: Normal Cancellation ---")
+result_a = simulate_ui_chat("Can I cancel ORD-1001?", admin_ctx)
+assert result_a is None  # cancellations don't create actions
 
 # B. Unknown service-credit case
 print("\n--- SCENARIO B: Unknown ---")
@@ -53,19 +66,28 @@ data.query_tickets = mock_query_tkt
 
 action_id = simulate_ui_chat("SLA for TKT-999", admin_ctx)
 print("\n[User clicks Reject]")
-print(f"Action State before Reject execution: {len(gateway.executed_actions)} executed.")
-gateway.reject(action_id)
-print(f"Action State after Reject execution: {len(gateway.executed_actions)} executed.")
+print(f"Action State before Reject: {len(gateway.executed_actions)} executed.")
+res_reject = gateway.reject(action_id)
+assert res_reject["status"] == "REJECTED", f"Expected REJECTED, got {res_reject}"
+print(f"Reject result: {res_reject['status']}")
+print(f"Action State after Reject: {len(gateway.executed_actions)} executed.")
 
 action_id_2 = simulate_ui_chat("SLA for TKT-999", admin_ctx)
 print("\n[User clicks Approve]")
 res = gateway.approve(action_id_2, admin_ctx)
-print(f"Action Execution Result: {res}")
-print(f"Action State after Approve execution: {len(gateway.executed_actions)} executed.")
+assert res["status"] == "EXECUTED", f"Expected EXECUTED, got {res}"
+assert res["revalidation"]["authorization"] == "PASSED"
+assert res["revalidation"]["rule_state"] == "PASSED"
+assert res["revalidation"]["payload_integrity"] == "PASSED"
+print(f"Approve result: {res['status']}")
+print(f"  Revalidation: {res['revalidation']}")
+print(f"Action State after Approve: {len(gateway.executed_actions)} executed.")
 data.query_tickets = original
 
 # D. Cross-account access
 print("\n--- SCENARIO D: Security ---")
 simulate_ui_chat("Cancel Northstar's ORD-1001", lw_ctx)
 
-print("\n=== UI SIMULATION COMPLETE ===")
+print("\n=== ALL ASSERTIONS PASSED ===")
+print("=== UI SIMULATION COMPLETE ===")
+

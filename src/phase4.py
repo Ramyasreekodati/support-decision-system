@@ -69,6 +69,16 @@ class OperationalDataStore:
         self.tickets = pd.read_excel(excel_path, "tickets")
         self.accounts = pd.read_excel(excel_path, "accounts")
         
+        # Parse dynamic snapshot from README
+        readme = pd.read_excel(excel_path, "README", header=None)
+        snapshot_str = str(readme.iloc[1, 1]) # row 1 = "Dataset snapshot", col 1 = "2026-08-16 11:00 Asia/Kolkata"
+        dt_str = snapshot_str.rsplit(' ', 1)[0]
+        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+        self.snapshot_time = IST.localize(dt)
+        
+    def get_snapshot_time(self) -> datetime:
+        return self.snapshot_time
+        
     def query_orders(self, context: SecurityContext, order_id: str) -> Optional[Dict[str, Any]]:
         order_row = self.orders[self.orders["order_id"] == order_id]
         if order_row.empty: return None
@@ -128,7 +138,7 @@ class RuleEngine:
         if account_id == 'ACCT-001':
             target_minutes = 15
             is_24x7 = True
-            evidence.append({"source": "05_Northstar_Logistics_Enterprise_Agreement.pdf", "rule": "Custom P1 15-minute target, 24x7"})
+            evidence.append({"source": "05_Northstar_Logistics_Enterprise_Agreement.pdf", "rule": "Custom P1 15-minute target, 24x7", "authority": "CUSTOMER_SPECIFIC"})
         else:
             if not has_sop:
                 return SLADecision("UNKNOWN", None, None, None, [], ["Missing General Support Policy."], "UNKNOWN", None)
@@ -136,15 +146,15 @@ class RuleEngine:
             if plan == 'Enterprise': 
                 target_minutes = 30
                 is_24x7 = True
-                evidence.append({"source": "01_Support_Policy_v3_CURRENT.pdf", "rule": "General P1 30-minute target, 24x7 for Enterprise plan"})
+                evidence.append({"source": "01_Support_Policy_v3_CURRENT.pdf", "rule": "General P1 30-minute target, 24x7 for Enterprise plan", "authority": "GENERAL_POLICY"})
             elif plan == 'Growth': 
                 target_minutes = 120
                 is_24x7 = False
-                evidence.append({"source": "01_Support_Policy_v3_CURRENT.pdf", "rule": "General P1 2 business hours target for Growth plan"})
+                evidence.append({"source": "01_Support_Policy_v3_CURRENT.pdf", "rule": "General P1 2 business hours target for Growth plan", "authority": "GENERAL_POLICY"})
             elif plan == 'Standard': 
                 target_minutes = 240
                 is_24x7 = False
-                evidence.append({"source": "01_Support_Policy_v3_CURRENT.pdf", "rule": "General P1 4 business hours target for Standard plan"})
+                evidence.append({"source": "01_Support_Policy_v3_CURRENT.pdf", "rule": "General P1 4 business hours target for Standard plan", "authority": "GENERAL_POLICY"})
             else: 
                 return SLADecision("UNKNOWN", None, None, None, [], ["Unknown plan."], "UNKNOWN", None)
             
@@ -159,6 +169,7 @@ class RuleEngine:
         escalation_payload = {
             "action": "ESCALATE_TICKET",
             "ticket_id": ticket_facts.get('ticket_id'),
+            "priority": "P1",
             "reason": "P1 requires immediate escalation",
             "evidence": [e["source"] for e in evidence]
         }
@@ -201,12 +212,12 @@ class ActionGateway:
         }
         return action_id
         
-    def approve(self, action_id: str, context: SecurityContext) -> str:
+    def approve(self, action_id: str, context: SecurityContext) -> dict:
         if action_id not in self.pending_actions:
-            return "Action not found."
+            return {"status": "FAILED", "error": "Action not found."}
         action = self.pending_actions[action_id]
         if action["context"].role != context.role or action["context"].account_scope != context.account_scope:
-            return "Unauthorized confirmation."
+            return {"status": "FAILED", "error": "Unauthorized confirmation."}
         
         action["state"] = ActionState.CONFIRM
         return self.revalidate_and_execute(action_id, context)
@@ -214,37 +225,49 @@ class ActionGateway:
     def get_pending_action(self, action_id: str) -> Optional[dict]:
         return self.pending_actions.get(action_id)
 
-    def reject(self, action_id: str) -> str:
+    def reject(self, action_id: str) -> dict:
         if action_id in self.pending_actions:
             action = self.pending_actions[action_id]
             del self.pending_actions[action_id]
-            return "Action rejected."
-        return "Action not found."
+            return {"status": "REJECTED", "error": "Action rejected."}
+        return {"status": "FAILED", "error": "Action not found."}
         
-    def revalidate_and_execute(self, action_id: str, context: SecurityContext) -> str:
+    def revalidate_and_execute(self, action_id: str, context: SecurityContext) -> dict:
         if action_id not in self.pending_actions:
-            return "Action not found."
+            return {"status": "FAILED", "error": "Action not found."}
             
         action = self.pending_actions[action_id]
         
         unique_exec_key = f"{action['payload']['action']}_{action['payload']['ticket_id']}"
         if unique_exec_key in self.executed_actions:
-            return "Action already executed (idempotent)."
+            return {"status": "FAILED", "error": "Action already executed (idempotent)."}
             
         action["state"] = ActionState.REVALIDATE
         payload = action["payload"]
         
+        revalidation = {
+            "authorization": "PENDING",
+            "record_access": "PENDING",
+            "rule_state": "PENDING",
+            "payload_integrity": "PENDING"
+        }
+        
         if payload["action"] != "ESCALATE_TICKET":
-            return "Revalidation failed: Action not allowed."
+            revalidation["payload_integrity"] = "FAILED"
+            return {"status": "FAILED", "error": "Revalidation failed: Action not allowed.", "revalidation": revalidation}
             
         ticket_id = payload["ticket_id"]
         try:
             ticket = self.data_store.query_tickets(context, ticket_id)
+            revalidation["authorization"] = "PASSED"
         except PermissionError:
-            return "Revalidation failed: Unauthorized access to ticket."
+            revalidation["authorization"] = "FAILED"
+            return {"status": "FAILED", "error": "Revalidation failed: Unauthorized access to ticket.", "revalidation": revalidation}
             
         if ticket is None:
-            return "Revalidation failed: Ticket no longer exists."
+            revalidation["record_access"] = "FAILED"
+            return {"status": "FAILED", "error": "Revalidation failed: Ticket no longer exists.", "revalidation": revalidation}
+        revalidation["record_access"] = "PASSED"
             
         # Re-inject first_response_at if testing mocked it
         first_response = payload.get('_mock_first_response')
@@ -255,14 +278,25 @@ class ActionGateway:
         sla_decision = self.rule_engine.evaluate_sla(ticket, docs, context.snapshot_time, is_p1=True)
         
         if sla_decision.state != "BREACHED":
-            return "Revalidation failed: Ticket is no longer in BREACHED state."
+            revalidation["rule_state"] = "FAILED"
+            return {"status": "FAILED", "error": "Revalidation failed: Ticket is no longer in BREACHED state.", "revalidation": revalidation}
+        revalidation["rule_state"] = "PASSED"
             
         if payload["reason"] != "P1 response target breached":
-            return "Revalidation failed: Tampered payload."
+            revalidation["payload_integrity"] = "FAILED"
+            return {"status": "FAILED", "error": "Revalidation failed: Tampered payload.", "revalidation": revalidation}
+        revalidation["payload_integrity"] = "PASSED"
             
         action["state"] = ActionState.EXECUTE
         self.executed_actions.add(unique_exec_key)
-        return "Action executed successfully."
+        return {
+            "status": "EXECUTED",
+            "revalidation": revalidation,
+            "execution": {
+                "status": "SUCCESS",
+                "action_id": action_id
+            }
+        }
 
 class TestPhase4SLA(unittest.TestCase):
     @classmethod
@@ -353,7 +387,7 @@ class TestPhase4SLA(unittest.TestCase):
         action_id = self.action_gateway.prepare(self.admin_ctx, payload)
         self.assertEqual(self.action_gateway.pending_actions[action_id]["state"], ActionState.PREPARE)
         res = self.action_gateway.reject(action_id)
-        self.assertEqual(res, "Action rejected.")
+        self.assertEqual(res["status"], "REJECTED")
         self.assertNotIn(action_id, self.action_gateway.pending_actions)
 
     def test_action_approve_execute(self):
@@ -365,18 +399,19 @@ class TestPhase4SLA(unittest.TestCase):
         }
         action_id = self.action_gateway.prepare(self.admin_ctx, payload)
         res = self.action_gateway.approve(action_id, self.admin_ctx)
-        self.assertEqual(res, "Action executed successfully.")
+        self.assertEqual(res["status"], "EXECUTED")
+        self.assertEqual(res["revalidation"]["authorization"], "PASSED")
         
         # Duplicate execution
         res_dup = self.action_gateway.approve(action_id, self.admin_ctx)
-        self.assertEqual(res_dup, "Action already executed (idempotent).")
+        self.assertEqual(res_dup["error"], "Action already executed (idempotent).")
 
     def test_unauthorized_execution(self):
         payload = {"action": "ESCALATE_TICKET", "ticket_id": "TKT-504"} # ACCT-001
         action_id = self.action_gateway.prepare(self.admin_ctx, payload)
         # Attempt to confirm as customer (not authorized)
         res = self.action_gateway.approve(action_id, self.lw_ctx) # ACCT-002
-        self.assertEqual(res, "Unauthorized confirmation.")
+        self.assertEqual(res["error"], "Unauthorized confirmation.")
 
     def test_tampered_payload_revalidation_failure(self):
         payload = {
@@ -387,7 +422,8 @@ class TestPhase4SLA(unittest.TestCase):
         }
         action_id = self.action_gateway.prepare(self.admin_ctx, payload)
         res = self.action_gateway.approve(action_id, self.admin_ctx)
-        self.assertEqual(res, "Revalidation failed: Tampered payload.")
+        self.assertEqual(res["error"], "Revalidation failed: Tampered payload.")
+        self.assertEqual(res["revalidation"]["payload_integrity"], "FAILED")
 
 if __name__ == '__main__':
     unittest.main()

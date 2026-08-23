@@ -101,7 +101,7 @@ class RuleEngine:
         
         evidence = []
         if has_sop:
-            evidence.append({"source": "03_Cancellation_and_Service_Credit_SOP_v4.pdf", "rule": "General Cancellation SOP"})
+            evidence.append({"source": "03_Cancellation_and_Service_Credit_SOP_v4.pdf", "rule": "General Cancellation SOP", "authority": "GENERAL_POLICY"})
             
         limitations = []
         if not has_sop:
@@ -113,13 +113,13 @@ class RuleEngine:
             if not has_northstar_agreement:
                 limitations.append("Northstar account detected, but Northstar Enterprise Agreement is missing. Cannot reliably determine cancellation fee.")
                 return DecisionResult("UNKNOWN", None, "missing_customer_agreement", evidence, limitations, False)
-            evidence.append({"source": "05_Northstar_Logistics_Enterprise_Agreement.pdf", "rule": "Northstar Waiver for BOOKED shipments"})
+            evidence.append({"source": "05_Northstar_Logistics_Enterprise_Agreement.pdf", "rule": "Northstar Waiver for BOOKED shipments", "authority": "CUSTOMER_SPECIFIC"})
 
         if account_id == 'ACCT-002':
             if not has_lumenworks_agreement:
                 limitations.append("LumenWorks account detected, but LumenWorks Service Agreement is missing. Cannot reliably determine overrides.")
                 return DecisionResult("UNKNOWN", None, "missing_customer_agreement", evidence, limitations, False)
-            evidence.append({"source": "06_LumenWorks_Service_Agreement.pdf", "rule": "No special cancellation-fee waiver applies"})
+            evidence.append({"source": "06_LumenWorks_Service_Agreement.pdf", "rule": "No special cancellation-fee waiver applies", "authority": "CUSTOMER_SPECIFIC"})
 
         if status == 'BOOKED':
             if account_id == 'ACCT-001':

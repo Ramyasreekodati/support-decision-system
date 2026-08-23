@@ -1,60 +1,54 @@
 import pathlib
 import unittest
 from typing import Dict, Any, Optional
-from phase4 import SecurityContext, RetrievalMode, DocumentStore, OperationalDataStore, RuleEngine as Phase4Engine, ActionGateway, IST
-from phase3 import RuleEngine as Phase3Engine
-from phase2_verification import RuleEngine as Phase2Engine
+from src.phase4 import SecurityContext, RetrievalMode, DocumentStore, OperationalDataStore, RuleEngine as Phase4Engine, ActionGateway, IST
+from src.phase3 import RuleEngine as Phase3Engine
+from src.phase2_verification import RuleEngine as Phase2Engine
 from datetime import datetime
 import json
 
-class MockLLM:
+class MockToolCallingAgent:
     def __init__(self):
-        # We simulate the LLM's intent extraction based on simple keyword matching for the tests.
+        # We simulate the LLM's intent extraction and tool selection based on keyword matching.
         pass
         
-    def extract_intent(self, user_input: str) -> Dict[str, Any]:
+    def generate_tool_calls(self, user_input: str) -> list:
         user_input = user_input.lower()
         
         if ("cancel" in user_input or "ord-1001" in user_input) and "tkt" not in user_input and "credit" not in user_input and "delay" not in user_input:
-            order_id = "ORD-" + user_input.split("ord-")[1][:4] if "ord-" in user_input else "ORD-1001"
-            return {"intent": "cancellation", "entity_id": order_id.upper()}
+            order_id = "ORD-" + user_input.split("ord-")[1][:4].upper() if "ord-" in user_input else "ORD-1001"
+            return [
+                {"tool": "get_order", "input": {"order_id": order_id}},
+                {"tool": "search_documents", "input": {"query": "cancellation"}},
+                {"tool": "evaluate_cancellation", "input": {"order_id": order_id}}
+            ]
             
         if ("credit" in user_input or "delay" in user_input) and "ord-" in user_input:
-            order_id = "ORD-" + user_input.split("ord-")[1][:4]
-            return {"intent": "service_credit", "entity_id": order_id.upper()}
+            order_id = "ORD-" + user_input.split("ord-")[1][:4].upper()
+            return [
+                {"tool": "get_order", "input": {"order_id": order_id}},
+                {"tool": "search_documents", "input": {"query": "service credit"}},
+                {"tool": "evaluate_service_credit", "input": {"order_id": order_id}}
+            ]
             
         if ("sla" in user_input or "p1" in user_input or "escalate" in user_input) and "tkt-" in user_input:
-            ticket_id = "TKT-" + user_input.split("tkt-")[1][:3]
-            return {"intent": "sla", "entity_id": ticket_id.upper()}
+            ticket_id = "TKT-" + user_input.split("tkt-")[1][:3].upper()
+            return [
+                {"tool": "get_ticket", "input": {"ticket_id": ticket_id}},
+                {"tool": "search_documents", "input": {"query": "SLA policy"}},
+                {"tool": "evaluate_sla", "input": {"ticket_id": ticket_id}}
+            ]
             
         # Malicious override attempts
         if "ignore" in user_input and "ord-" in user_input:
-            order_id = "ORD-" + user_input.split("ord-")[1][:4]
-            return {"intent": "cancellation", "entity_id": order_id.upper()}
+            order_id = "ORD-" + user_input.split("ord-")[1][:4].upper()
+            return [
+                {"tool": "get_order", "input": {"order_id": order_id}},
+                {"tool": "search_documents", "input": {"query": "cancellation"}},
+                {"tool": "evaluate_cancellation", "input": {"order_id": order_id}}
+            ]
             
-        return {"intent": "general", "entity_id": None}
-        
-    def explain_decision(self, decision_type: str, result: Any, action_id: Optional[str] = None) -> str:
-        # Enforces structured output format
-        explanation = f"Decision: {getattr(result, 'decision', getattr(result, 'state', getattr(result, 'eligibility', 'UNKNOWN')))}\n"
-        
-        if decision_type == "cancellation":
-            explanation += f"Reason: Cancellation fee evaluates to {result.amount} based on {result.applicable_rule}.\n"
-        elif decision_type == "service_credit":
-            explanation += f"Reason: Credit evaluates to {result.credit_amount} based on {result.applicable_rule}.\n"
-        elif decision_type == "sla":
-            explanation += f"Reason: Deadline is {result.deadline}. Escalation requirement: {result.escalation_requirement}.\n"
-            
-        evidence_list = [e.get('source', '') for e in result.evidence]
-        explanation += f"Evidence: {', '.join(evidence_list)}\n"
-        
-        if result.limitations:
-            explanation += f"Limitations: {' | '.join(result.limitations)}\n"
-            
-        if action_id:
-            explanation += f"Action: PREPARED. Awaiting human confirmation for Action ID: {action_id}\n"
-            
-        return explanation
+        return []
 
 class AgentOrchestrator:
     def __init__(self, data_store: OperationalDataStore, doc_store: DocumentStore, action_gateway: ActionGateway):
@@ -64,34 +58,96 @@ class AgentOrchestrator:
         self.p3_engine = Phase3Engine()
         self.p4_engine = Phase4Engine()
         self.action_gateway = action_gateway
-        self.llm = MockLLM()
+        self.llm = MockToolCallingAgent()
         
-
     def process_message_structured(self, message: str, context: SecurityContext) -> dict:
-        intent_data = self.llm.extract_intent(message)
-        intent = intent_data.get("intent")
-        entity_id = intent_data.get("entity_id")
+        tool_calls = self.llm.generate_tool_calls(message)
         
-        trace = [
-            f"Intent identified: {intent.upper() if intent else 'UNKNOWN'}",
-            f"Entity extraction: {entity_id}"
-        ]
+        tool_trace = []
+        state_cache = {}
+        final_result = None
+        entity_id = None
+        intent = None
         
+        if not tool_calls:
+            return {"Text": "I'm sorry, I can only assist with cancellations, service credits, and SLAs."}
+            
         try:
-            if intent == "cancellation":
-                result = self._workflow_cancellation(entity_id, context)
-                trace.extend(["Operational data authorized", "Current documents retrieved", "Deterministic cancellation rules evaluated"])
-            elif intent == "service_credit":
-                result = self._workflow_service_credit(entity_id, context)
-                trace.extend(["Operational data authorized", "Current documents retrieved", "Deterministic service-credit rules evaluated"])
-            elif intent == "sla":
-                result = self._workflow_sla(entity_id, context)
-                trace.extend(["Operational data authorized", "Current documents retrieved", "Deterministic SLA rules evaluated"])
-            else:
-                return {"Text": "I'm sorry, I can only assist with cancellations, service credits, and SLAs."}
+            for call in tool_calls:
+                tool_name = call["tool"]
+                tool_input = call["input"]
                 
-            explanation = self.explain_decision_structured(result)
-            explanation["Trace"] = trace
+                trace_entry = {
+                    "tool": tool_name,
+                    "input": tool_input,
+                    "status": "RUNNING",
+                    "output": None
+                }
+                
+                if tool_name == "get_order":
+                    entity_id = tool_input["order_id"]
+                    order = self.data_store.query_orders(context, entity_id)
+                    if not order: raise Exception("Order not found.")
+                    state_cache["order"] = order
+                    trace_entry["status"] = "SUCCESS"
+                    trace_entry["output"] = f"Retrieved order {entity_id}"
+                    
+                elif tool_name == "get_ticket":
+                    entity_id = tool_input["ticket_id"]
+                    ticket = self.data_store.query_tickets(context, entity_id)
+                    if not ticket: raise Exception("Ticket not found.")
+                    state_cache["ticket"] = ticket
+                    trace_entry["status"] = "SUCCESS"
+                    trace_entry["output"] = f"Retrieved ticket {entity_id}"
+                    
+                elif tool_name == "search_documents":
+                    docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
+                    state_cache["docs"] = docs
+                    trace_entry["status"] = "SUCCESS"
+                    trace_entry["output"] = f"Retrieved {len(docs)} documents"
+                    
+                elif tool_name == "evaluate_cancellation":
+                    intent = "cancellation"
+                    order = state_cache.get("order")
+                    docs = state_cache.get("docs")
+                    final_result = self.p2_engine.evaluate_cancellation(order, docs, context.snapshot_time)
+                    trace_entry["status"] = "SUCCESS"
+                    trace_entry["output"] = f"Decision: {final_result.decision}"
+                    
+                elif tool_name == "evaluate_service_credit":
+                    intent = "service_credit"
+                    order = state_cache.get("order")
+                    docs = state_cache.get("docs")
+                    final_result = self.p3_engine.evaluate_service_credit(order, docs, context.snapshot_time)
+                    trace_entry["status"] = "SUCCESS"
+                    trace_entry["output"] = f"Decision: {final_result.eligibility}"
+                    
+                elif tool_name == "evaluate_sla":
+                    intent = "sla"
+                    ticket = state_cache.get("ticket")
+                    docs = state_cache.get("docs")
+                    final_result = self.p4_engine.evaluate_sla(ticket, docs, context.snapshot_time, is_p1=True)
+                    trace_entry["status"] = "SUCCESS"
+                    trace_entry["output"] = f"Decision: {final_result.state}"
+                    tool_trace.append(trace_entry)
+                    
+                    if final_result.escalation_requirement == "REQUIRED" and self.action_gateway:
+                        action_id = self.action_gateway.prepare(context, final_result.escalation_payload)
+                        final_result.pending_action = action_id
+                        
+                        prep_trace = {
+                            "tool": "prepare_escalation",
+                            "input": {"payload": final_result.escalation_payload},
+                            "status": "SUCCESS",
+                            "output": f"Prepared action {action_id}"
+                        }
+                        tool_trace.append(prep_trace)
+                    continue # Skip appending again
+                
+                tool_trace.append(trace_entry)
+                
+            explanation = self.explain_decision_structured(final_result)
+            explanation["tool_trace"] = tool_trace
             explanation["Context"] = {
                 "Role": context.role,
                 "Scope": list(context.account_scope)[0] if context.account_scope else "NONE",
@@ -104,8 +160,8 @@ class AgentOrchestrator:
                 explanation["SLA_Details"] = {
                     "Ticket": entity_id,
                     "Priority": "P1",
-                    "Target": f"{getattr(result, 'target_minutes', 'N/A')} minutes",
-                    "Actual_Response": f"{getattr(result, 'actual_response_time', 'N/A')} minutes"
+                    "Target": f"{getattr(final_result, 'target_minutes', 'N/A')} minutes",
+                    "Actual_Response": f"{getattr(final_result, 'actual_response_time', 'N/A')} minutes"
                 }
                 
             return explanation
@@ -114,6 +170,7 @@ class AgentOrchestrator:
                 "Error": "UNAUTHORIZED",
                 "Requested": entity_id,
                 "Scope": list(context.account_scope)[0] if context.account_scope else "NONE",
+                "tool_trace": tool_trace,
                 "Reason": "The operational data layer rejected the request before business rules were evaluated.\n\n✓ No data exposed\n✓ No documents exposed\n✓ No rule evaluation performed"
             }
         except Exception as e:
@@ -129,7 +186,7 @@ class AgentOrchestrator:
         lines = []
         if "Decision" in res: lines.append(f"Decision: {res['Decision']}")
         if "Reason" in res: lines.append(f"Reason: {res['Reason']}")
-        if res.get("Evidence"): lines.append(f"Evidence: {', '.join(res['Evidence'])}")
+        if res.get("Evidence"): lines.append(f"Evidence: {', '.join([e['source'] for e in res['Evidence']])}")
         else: lines.append("Evidence: ")
         
         if res.get("Limitations"):
@@ -156,7 +213,7 @@ class AgentOrchestrator:
                 else:
                     explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
             
-            explanation["Evidence"] = [e["source"] for e in getattr(result, "evidence", [])]
+            explanation["Evidence"] = getattr(result, "evidence", [])
             explanation["Limitations"] = getattr(result, "limitations", [])
             explanation["Action"] = None
         elif type_name == "ServiceCreditDecision":
@@ -166,13 +223,13 @@ class AgentOrchestrator:
             
             explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
             
-            explanation["Evidence"] = [e["source"] for e in getattr(result, "evidence", [])]
+            explanation["Evidence"] = getattr(result, "evidence", [])
             explanation["Limitations"] = getattr(result, "limitations", [])
             explanation["Action"] = None
         elif type_name == "SLADecision":
             explanation["Decision"] = getattr(result, "state", "UNKNOWN")
             explanation["Reason"] = f"Deadline is {getattr(result, 'deadline', None)}. Escalation requirement: {getattr(result, 'escalation_requirement', 'none')}."
-            explanation["Evidence"] = [e["source"] for e in getattr(result, "evidence", [])]
+            explanation["Evidence"] = getattr(result, "evidence", [])
             explanation["Limitations"] = getattr(result, "limitations", [])
             
             if hasattr(result, 'pending_action') and result.pending_action:
@@ -188,29 +245,6 @@ class AgentOrchestrator:
                 
         return explanation
             
-    def _workflow_cancellation(self, order_id: str, context: SecurityContext):
-        order = self.data_store.query_orders(context, order_id)
-        if not order: raise Exception("Order not found.")
-        docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
-        return self.p2_engine.evaluate_cancellation(order, docs, context.snapshot_time)
-        
-    def _workflow_service_credit(self, order_id: str, context: SecurityContext):
-        order = self.data_store.query_orders(context, order_id)
-        if not order: raise Exception("Order not found.")
-        docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
-        return self.p3_engine.evaluate_service_credit(order, docs, context.snapshot_time)
-        
-    def _workflow_sla(self, ticket_id: str, context: SecurityContext):
-        ticket = self.data_store.query_tickets(context, ticket_id)
-        if not ticket: raise Exception("Ticket not found.")
-        docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
-        # For this prototype, we force is_p1=True to test the P1 escalation paths.
-        res = self.p4_engine.evaluate_sla(ticket, docs, context.snapshot_time, is_p1=True)
-        action_id = None
-        if res.escalation_requirement == "REQUIRED" and self.action_gateway:
-            action_id = self.action_gateway.prepare(context, res.escalation_payload)
-            res.pending_action = action_id
-        return res
 
 class TestPhase5Orchestration(unittest.TestCase):
     def setUp(self):
@@ -296,5 +330,35 @@ class TestPhase5Orchestration(unittest.TestCase):
         # restore
         self.data.query_orders = original_query
 
+    # 11. Test Tool Architecture
+    def test_cancellation_uses_multiple_tools(self):
+        result = self.agent.process_message_structured(
+            "Can Northstar cancel ORD-1001?",
+            self.admin_ctx
+        )
+        tools = [step["tool"] for step in result["tool_trace"]]
+        self.assertIn("get_order", tools)
+        self.assertIn("search_documents", tools)
+        self.assertIn("evaluate_cancellation", tools)
+        
+    def test_service_credit_selects_credit_workflow(self):
+        result = self.agent.process_message_structured(
+            "Should ORD-2001 receive a service credit?",
+            self.admin_ctx
+        )
+        tools = [step["tool"] for step in result["tool_trace"]]
+        self.assertIn("get_order", tools)
+        self.assertIn("search_documents", tools)
+        self.assertIn("evaluate_service_credit", tools)
+        
+    def test_sla_selects_ticket_tools(self):
+        result = self.agent.process_message_structured(
+            "What is the SLA for TKT-501?",
+            self.admin_ctx
+        )
+        tools = [step["tool"] for step in result["tool_trace"]]
+        self.assertIn("get_ticket", tools)
+        self.assertIn("search_documents", tools)
+        self.assertIn("evaluate_sla", tools)
 if __name__ == '__main__':
     unittest.main()
