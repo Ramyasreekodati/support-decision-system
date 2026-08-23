@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 import re
 from typing import Dict, Any, List, Optional
@@ -8,6 +8,7 @@ from src.data.operational_store import OperationalDataStore
 from src.data.document_store import DocumentStore
 from src.actions.action_gateway import ActionGateway
 from src.tools.dispatcher import ToolDispatcher
+from src.domain.proactive_engine import ProactiveEngine
 from src.agent.providers import GeminiProvider, LLMResponse
 
 logger = logging.getLogger(__name__)
@@ -19,19 +20,29 @@ class LiveToolCallingAgent:
         self.dispatcher = dispatcher
         self.provider = provider or GeminiProvider()
 
-    def execute_turn(self, prompt: str, context: SecurityContext) -> Dict[str, Any]:
+    def execute_turn(self, prompt: str, context: SecurityContext, chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         self.dispatcher.collected_state = {}
         schemas = self.dispatcher.get_schemas()
         
         system_instruction = (
             "You are the ParcelPilot AI Support Agent. Assist support staff and customers with order cancellations, "
-            "service credit inquiries, and SLA escalations. Select and invoke appropriate tools to look up facts "
-            "and compute rule decisions. NEVER fabricate fees, deadlines, or policy terms yourself. Always cite the exact evidence."
+            "service credit inquiries, SLA escalations, ticket updates, and proactive systemic issue insights. "
+            "Select and invoke appropriate tools to look up verified facts and compute rule decisions. "
+            "NEVER fabricate fees, deadlines, or policy terms yourself. Always cite the exact evidence."
         )
 
         messages = [
-            {"role": "user", "content": f"{system_instruction}\n\nUser Request: {prompt}"}
+            {"role": "user", "content": system_instruction}
         ]
+
+        if chat_history:
+            for turn in chat_history[-6:]:
+                role = "user" if turn.get("role") == "user" else "assistant"
+                content = turn.get("content") or ""
+                if content:
+                    messages.append({"role": role, "content": content})
+
+        messages.append({"role": "user", "content": f"User Request: {prompt}"})
 
         tool_trace = []
         iteration = 0
@@ -126,14 +137,24 @@ class LiveToolCallingAgent:
                 "Actual_Response": f"{res.actual_response_time or 'N/A'} minutes"
             }
 
+        elif "proactive_insights" in state:
+            insights = state["proactive_insights"]
+            explanation["Decision"] = f"PROACTIVE_INSIGHTS ({insights.get('total_open_tickets', 0)} Open Tickets)"
+            explanation["Reason"] = f"Identified {insights.get('sla_breached_count', 0)} breached tickets and {insights.get('active_clusters_count', 0)} issue clusters."
+            explanation["Insights"] = insights
+            explanation["Intent"] = "proactive_insights"
+
         if "pending_action" in state:
+            pa = state["pending_action"]
             explanation["Action"] = {
                 "status": "PREPARED",
-                "action_id": state["pending_action"]["action_id"],
-                "type": state["pending_action"]["type"],
-                "ticket_id": state["pending_action"]["ticket_id"],
-                "priority": state["pending_action"]["priority"],
-                "reason": state["pending_action"]["reason"]
+                "action_id": pa["action_id"],
+                "type": pa.get("type", "ESCALATE_TICKET"),
+                "ticket_id": pa.get("ticket_id"),
+                "priority": pa.get("priority", "P1"),
+                "new_status": pa.get("new_status"),
+                "task_type": pa.get("task_type"),
+                "reason": pa.get("reason", "")
             }
         else:
             explanation["Action"] = None
@@ -151,7 +172,7 @@ class DeterministicToolEngine:
     def __init__(self, dispatcher: ToolDispatcher):
         self.dispatcher = dispatcher
 
-    def execute_turn(self, prompt: str, context: SecurityContext) -> Dict[str, Any]:
+    def execute_turn(self, prompt: str, context: SecurityContext, chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         self.dispatcher.collected_state = {}
         user_lower = prompt.lower()
         
@@ -160,11 +181,28 @@ class DeterministicToolEngine:
         
         order_id = ord_match.group(1).upper() if ord_match else None
         ticket_id = tkt_match.group(1).upper() if tkt_match else None
+
+        # Resolve entity from chat history if omitted in current turn
+        if not order_id and not ticket_id and chat_history:
+            for turn in reversed(chat_history):
+                content = turn.get("content", "")
+                m_ord = re.search(r'\b(ORD-\d+)\b', content, re.IGNORECASE)
+                m_tkt = re.search(r'\b(TKT-\d+)\b', content, re.IGNORECASE)
+                if m_ord and not order_id:
+                    order_id = m_ord.group(1).upper()
+                if m_tkt and not ticket_id:
+                    ticket_id = m_tkt.group(1).upper()
+                if order_id or ticket_id:
+                    break
         
         tool_trace = []
 
         try:
-            if ("cancel" in user_lower or (order_id and "credit" not in user_lower and "delay" not in user_lower and "sla" not in user_lower and not ticket_id)):
+            if "proactive" in user_lower or "cluster" in user_lower or "queue" in user_lower or "systemic" in user_lower or "anomal" in user_lower:
+                self._run_tool("get_proactive_insights", {}, context, tool_trace)
+                return self._build_deterministic_response(tool_trace, context, intent="proactive_insights", entity_id="GLOBAL_QUEUE")
+
+            elif ("cancel" in user_lower or (order_id and "credit" not in user_lower and "delay" not in user_lower and "sla" not in user_lower and not ticket_id)):
                 target_ord = order_id or "ORD-1001"
                 self._run_tool("get_order", {"order_id": target_ord}, context, tool_trace)
                 self._run_tool("search_documents", {"query": "cancellation policy"}, context, tool_trace)
@@ -191,7 +229,7 @@ class DeterministicToolEngine:
                 return self._build_deterministic_response(tool_trace, context, intent="cancellation", entity_id=order_id)
 
             else:
-                return {"Text": "I'm sorry, I can only assist with cancellations, service credits, and SLAs.", "Mode": "OFFLINE_DETERMINISTIC_TEST_ENGINE"}
+                return {"Text": "I'm ParcelPilot Support Agent. I can assist with order cancellations, service credits, SLA escalations, and proactive queue analytics.", "Mode": "OFFLINE_DETERMINISTIC_TEST_ENGINE"}
 
         except PermissionError:
             entity_id = order_id or ticket_id or "UNKNOWN"
@@ -248,14 +286,23 @@ class DeterministicToolEngine:
                 "Actual_Response": f"{res.actual_response_time or 'N/A'} minutes"
             }
 
+        elif "proactive_insights" in state:
+            insights = state["proactive_insights"]
+            explanation["Decision"] = f"PROACTIVE_INSIGHTS ({insights.get('total_open_tickets', 0)} Open Tickets)"
+            explanation["Reason"] = f"Identified {insights.get('sla_breached_count', 0)} breached tickets and {insights.get('active_clusters_count', 0)} systemic issue clusters."
+            explanation["Insights"] = insights
+
         if "pending_action" in state:
+            pa = state["pending_action"]
             explanation["Action"] = {
                 "status": "PREPARED",
-                "action_id": state["pending_action"]["action_id"],
-                "type": state["pending_action"]["type"],
-                "ticket_id": state["pending_action"]["ticket_id"],
-                "priority": state["pending_action"]["priority"],
-                "reason": state["pending_action"]["reason"]
+                "action_id": pa["action_id"],
+                "type": pa.get("type", "ESCALATE_TICKET"),
+                "ticket_id": pa.get("ticket_id"),
+                "priority": pa.get("priority", "P1"),
+                "new_status": pa.get("new_status"),
+                "task_type": pa.get("task_type"),
+                "reason": pa.get("reason", "")
             }
         else:
             explanation["Action"] = None
@@ -280,16 +327,16 @@ class AgentService:
     def is_live_mode(self) -> bool:
         return self.gemini_provider.is_available()
 
-    def process_message_structured(self, message: str, context: SecurityContext) -> Dict[str, Any]:
+    def process_message_structured(self, message: str, context: SecurityContext, chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         if self.is_live_mode:
             logger.info("Executing via LiveToolCallingAgent (Gemini)")
-            return self.live_agent.execute_turn(message, context)
+            return self.live_agent.execute_turn(message, context, chat_history=chat_history)
         else:
             logger.info("Executing via DeterministicToolEngine (Offline Mode)")
-            return self.offline_engine.execute_turn(message, context)
+            return self.offline_engine.execute_turn(message, context, chat_history=chat_history)
 
-    def process_message(self, message: str, context: SecurityContext) -> str:
-        res = self.process_message_structured(message, context)
+    def process_message(self, message: str, context: SecurityContext, chat_history: Optional[List[Dict[str, Any]]] = None) -> str:
+        res = self.process_message_structured(message, context, chat_history=chat_history)
         if "Text" in res and len(res) == 1:
             return res["Text"]
         if "Error" in res:
@@ -308,6 +355,9 @@ class AgentService:
             lines.append(f"Action: PREPARED. Awaiting human confirmation for Action ID: {res['Action']['action_id']}")
 
         return "\n".join(lines)
+
+    def get_proactive_insights(self, context: SecurityContext) -> Dict[str, Any]:
+        return self.dispatcher.proactive_engine.get_systemic_insights(context)
 
     def get_snapshot_time(self) -> datetime:
         return self.dispatcher.data_store.get_snapshot_time()

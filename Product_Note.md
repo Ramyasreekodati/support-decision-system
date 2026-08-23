@@ -5,43 +5,43 @@ B2B logistics operations teams manage high-value client contracts with complex c
 
 ---
 
-## 2. Additional Client Problem Selected: Problem 2 (Trust & Reliability)
+## 2. Additional Client Problems Addressed: Problem 1 & Problem 2
 
-We prioritized **Problem 2 (Trust & Reliability)** over raw reactive automation. In enterprise logistics, an incorrectly calculated cancellation fee or an unapproved ticket mutation creates immediate financial and legal liabilities.
+We implemented concrete solutions for **both** core client challenges:
 
-### How Trust & Reliability is Addressed:
-1. **Deterministic Rule Enforcement:** Business logic (cancellation fee math, delay thresholds, and SLA timers) is executed exclusively by auditable Python domain engines (`src/domain/`), not unconstrained LLM hallucinations.
+### Problem 1: Proactive Issue Detection
+Rather than remaining purely reactive, the system features an operational monitoring dashboard:
+1. **Real-Time SLA Risk Watchlist:** Tracks open tickets relative to the frozen snapshot timestamp, automatically identifying breached tickets (`TKT-501`) and countdown risks.
+2. **Known Issue Clustering:** Groups incoming tickets against operational defect definitions (`KI-208` CSV bulk upload failures, `KI-211` SwiftShip webhook sync delay, and platform-wide outages).
+3. **Cross-Tenant Anomaly Detection:** Identifies systemic incidents impacting multiple enterprise accounts simultaneously.
+
+### Problem 2: Trust & Reliability
+1. **Deterministic Rule Enforcement:** Business logic (cancellation fees, delay attribution, SLA timers) is executed exclusively by auditable Python domain engines (`src/domain/`), preventing LLM hallucination.
 2. **Explicit Evidence Provenance:** Every response outputs exact PDF citations classified by authority level:
    - `CUSTOMER_SPECIFIC (Overrides Standard Policy)` for enterprise contracts (e.g., Northstar Agreement).
    - `GENERAL_POLICY (Standard Precedence)` for baseline operating procedures (SOP v4).
-3. **Transparent Handling of Missing Facts (`UNKNOWN`):** When critical data is missing (e.g., `pickup_actual_at` on order `ORD-2001` or undefined non-24x7 business hours), the system explicitly refuses to guess. It returns `UNKNOWN` and lists the exact missing facts.
-4. **Human-in-the-Loop Action Gateway:** The AI cannot execute state-changing actions directly. It only stages proposals (`PREPARED`). Execution requires human confirmation in the UI followed by a live 4-point revalidation (Auth, Record Access, Live Rule State, and SHA256 Payload Hash integrity).
-5. **Data-Layer Tenant Isolation:** Security boundaries are enforced in `OperationalDataStore` via `is_authorized()`, raising `PermissionError` before any business rules or documents are accessed.
+3. **Transparent Handling of Missing Facts (`UNKNOWN`):** When critical data is missing (e.g., `pickup_actual_at` on order `ORD-2001` or undefined non-24x7 business hours), the system refuses to guess, explicitly returning `UNKNOWN` with limitation notes.
+4. **Human-in-the-Loop Action Gateway:** The AI cannot mutate state directly. Actions (`ESCALATE_TICKET`, `UPDATE_TICKET`, `CREATE_TASK`) are staged as `PREPARED` proposals requiring human approval in the UI with live 4-point revalidation (Auth, Record Access, Live Rule State, and SHA256 Payload Hash integrity).
+5. **Data-Layer Tenant Isolation:** Security boundaries are enforced in `OperationalDataStore` via `is_authorized()`, raising `PermissionError` before business rules or documents are accessed.
 
 ---
 
-## 3. Product Roadmap: Future Development (Including Problem 1)
+## 3. Product Roadmap: Future Development
 
-If continuing to develop ParcelPilot, our prioritized roadmap includes:
-
-1. **Problem 1 — Proactive Anomaly & Issue Detection (Near-Term Priority):**
-   - Implement an asynchronous queue monitor that scans active shipments and support tickets every 60 seconds.
-   - Detect emerging clusters (e.g., multiple CSV upload failures linked to `KI-208` or pickup confirmation delays linked to `KI-211`).
-   - Automatically surface at-risk P1 tickets approaching the 15-minute / 30-minute threshold before breach occurs.
-2. **Dynamic Corporate Credit Ledgers:**
+1. **Dynamic Corporate Credit Ledgers:**
    - Integrate an external transactional ledger to track cumulative monthly service credits against the ₹5,000 corporate annual cap for Northstar.
-3. **Calendar-Aware Business Hours Engine:**
+2. **Calendar-Aware Business Hours Engine:**
    - Implement a configurable holiday and operating-hours calendar for Growth and Standard tiers (e.g., 9 AM - 6 PM IST on business days).
-4. **Webhook Event Sinks:**
-   - Subscribe directly to carrier webhooks (e.g., SwiftShip API) to invalidate stale order states in real-time.
+3. **Carrier Webhook Ingestion:**
+   - Direct carrier API integrations (e.g., SwiftShip webhook listener) to refresh live order states automatically.
 
 ---
 
 ## 4. What Was Intentionally Left Out of the Submission
 
-1. **Autonomous Mutation Authority:** We intentionally excluded any `execute_escalation` tool from the LLM's toolset. Actions must be staged and reviewed by authorized human operators.
+1. **Autonomous Mutation Authority:** We intentionally excluded autonomous execution tools from the LLM. Consequential mutations must be staged and confirmed by authorized human operators.
 2. **Multi-Tenant Distributed Database Cluster:** We used Excel parsing with dynamic snapshot reconstruction to match the provided assessment data pack without introducing external cloud database dependencies.
-3. **OAuth/SAML Provider Integration:** Authentication context is modeled cleanly via `SecurityContext` selectable via the UI sidebar.
+3. **OAuth/SAML Provider Integration:** Authentication context is modeled via `SecurityContext` selectable via the UI sidebar.
 
 ---
 

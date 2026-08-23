@@ -1,3 +1,11 @@
+import sys
+import pathlib
+
+# Ensure repository root is in Python sys.path for Streamlit Cloud deployment
+ROOT_DIR = pathlib.Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import logging
 import html
 from typing import Dict, Any, Optional
@@ -10,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(
-    page_title="ParcelPilot Support System",
+    page_title="ParcelPilot Support & Decision System",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -69,14 +77,19 @@ st.markdown(
         padding: 1.2rem;
         margin: 1rem 0;
     }
-    .trace-item {
+    .metric-card {
         background-color: #F8FAFC;
         border: 1px solid #E2E8F0;
-        border-radius: 6px;
-        padding: 0.6rem 0.8rem;
-        margin-bottom: 0.5rem;
-        font-family: monospace;
-        font-size: 0.85rem;
+        border-radius: 8px;
+        padding: 1rem;
+        text-align: center;
+    }
+    .cluster-card {
+        border: 1px solid #CBD5E1;
+        border-radius: 8px;
+        padding: 1.2rem;
+        margin-bottom: 1rem;
+        background-color: #FFFFFF;
     }
     </style>
     """,
@@ -115,8 +128,13 @@ if role == "support_admin":
 else:
     account_choice = st.sidebar.selectbox(
         "Tenant Account",
-        options=["ACCT-001", "ACCT-002"],
-        format_func=lambda a: f"{a} — Northstar Logistics" if a == "ACCT-001" else f"{a} — LumenWorks Inc."
+        options=["ACCT-001", "ACCT-002", "ACCT-003", "ACCT-004"],
+        format_func=lambda a: {
+            "ACCT-001": "ACCT-001 — Northstar Logistics (Enterprise)",
+            "ACCT-002": "ACCT-002 — LumenWorks Inc. (Growth)",
+            "ACCT-003": "ACCT-003 — Beacon Retail (Standard)",
+            "ACCT-004": "ACCT-004 — Axis Labs (Enterprise)"
+        }.get(a, a)
     )
     scope = frozenset([account_choice])
     account_label = account_choice
@@ -159,8 +177,8 @@ if st.sidebar.button("🧹 Clear Conversation", use_container_width=True):
 st.markdown(
     """
     <div class="hero-box">
-        <h1 class="hero-title">📦 ParcelPilot Support Agent</h1>
-        <p class="hero-subtitle">Production-grade AI Support Decision System with deterministic safety boundaries and human-in-the-loop action governance.</p>
+        <h1 class="hero-title">📦 ParcelPilot Support & Decision System</h1>
+        <p class="hero-subtitle">Production-grade AI Support Decision System with deterministic safety boundaries, proactive queue analytics, and human-gated action governance.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -174,11 +192,11 @@ def render_decision_card(data: Dict[str, Any]):
     if not decision:
         return
 
-    if decision in ["CANCELLATION_ALLOWED", "ELIGIBLE", "NOT_BREACHED"]:
+    if any(k in decision for k in ["ALLOWED", "ELIGIBLE", "NOT_BREACHED", "PROACTIVE"]):
         st.success(f"### Decision: {decision}")
-    elif decision in ["UNKNOWN", "BUSINESS_TIME_CALCULATION_UNSPECIFIED"]:
+    elif any(k in decision for k in ["UNKNOWN", "UNSPECIFIED", "WARNING"]):
         st.warning(f"### Decision: ⚠️ {decision}")
-    elif decision in ["BREACHED", "DEADLINE_ELAPSED"]:
+    elif any(k in decision for k in ["BREACHED", "DEADLINE_ELAPSED"]):
         st.error(f"### Decision: 🚨 {decision}")
     else:
         st.info(f"### Decision: {decision}")
@@ -228,13 +246,15 @@ def render_evidence_panel(evidence_list: list):
 
 def render_action_review(action: Dict[str, Any]):
     action_id = action.get("action_id", "act_unknown")
+    act_type = action.get("type", "ESCALATE_TICKET")
+    
     st.markdown(
         f"""
         <div class="action-card">
             <h3 style="color:#B45309; margin-top:0;">⚠️ Action Requires Human Confirmation</h3>
-            <p><strong>Action ID:</strong> <code>{html.escape(action_id)}</code> | <strong>Type:</strong> <code>{html.escape(str(action.get('type', 'ESCALATION')))}</code></p>
-            <p><strong>Ticket ID:</strong> <code>{html.escape(str(action.get('ticket_id', 'N/A')))}</code> | <strong>Proposed Priority:</strong> <code>{html.escape(str(action.get('priority', 'P1')))}</code></p>
-            <p><strong>Reason:</strong> {html.escape(str(action.get('reason', 'N/A')))}</p>
+            <p><strong>Action ID:</strong> <code>{html.escape(action_id)}</code> | <strong>Type:</strong> <code>{html.escape(str(act_type))}</code></p>
+            <p><strong>Ticket ID:</strong> <code>{html.escape(str(action.get('ticket_id', 'N/A')))}</code> | <strong>Priority / Status:</strong> <code>{html.escape(str(action.get('priority') or action.get('new_status') or 'N/A'))}</code></p>
+            <p><strong>Details / Reason:</strong> {html.escape(str(action.get('reason', 'N/A')))}</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -265,83 +285,166 @@ def render_action_review(action: Dict[str, Any]):
             st.rerun()
 
 # ------------------------------------------------------------
-# Main Chat & Demonstration Stream
+# Main Navigation Tabs
 # ------------------------------------------------------------
-for msg in st.session_state.chat_history:
-    with st.chat_message(msg["role"]):
-        if msg["role"] == "user":
-            st.markdown(msg["content"])
-        else:
-            structured = msg.get("structured", {})
-            if "Error" in structured and structured["Error"] == "UNAUTHORIZED":
-                st.error("### 🛑 Access Denied")
-                st.markdown(f"**Tenant Isolation Enforced:** The active context (`{structured.get('Scope', 'SCOPED')}`) is not authorized to access record `{structured.get('Requested', 'N/A')}`.")
-                st.caption("✓ No operational data exposed · ✓ No documents retrieved · ✓ No business rules evaluated")
-            elif "Decision" in structured:
-                render_decision_card(structured)
-                render_evidence_panel(structured.get("Evidence") or [])
-                render_tool_trace(structured.get("tool_trace") or [])
-            elif msg.get("content"):
+tab_chat, tab_proactive = st.tabs(["💬 Interactive Support Chat", "📊 Proactive Operations Dashboard (Problem 1)"])
+
+# ------------------------------------------------------------
+# TAB 1: Support Chat
+# ------------------------------------------------------------
+with tab_chat:
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            if msg["role"] == "user":
                 st.markdown(msg["content"])
+            else:
+                structured = msg.get("structured", {})
+                if "Error" in structured and structured["Error"] == "UNAUTHORIZED":
+                    st.error("### 🛑 Access Denied")
+                    st.markdown(f"**Tenant Isolation Enforced:** The active context (`{structured.get('Scope', 'SCOPED')}`) is not authorized to access record `{structured.get('Requested', 'N/A')}`.")
+                    st.caption("✓ No operational data exposed · ✓ No documents retrieved · ✓ No business rules evaluated")
+                elif "Decision" in structured:
+                    render_decision_card(structured)
+                    render_evidence_panel(structured.get("Evidence") or [])
+                    render_tool_trace(structured.get("tool_trace") or [])
+                elif msg.get("content"):
+                    st.markdown(msg["content"])
 
-# Render any active pending action requiring human review
-if st.session_state.pending_action:
-    render_action_review(st.session_state.pending_action)
-
-# Sample prompt suggestions
-st.markdown("##### 💡 Suggested Demo Queries")
-c1, c2, c3, c4 = st.columns(4)
-demo_query = None
-if c1.button("ORD-1001 Cancellation", use_container_width=True):
-    demo_query = "Can Northstar cancel ORD-1001 without a cancellation fee?"
-if c2.button("ORD-2001 Service Credit", use_container_width=True):
-    demo_query = "Is ORD-2001 eligible for a service credit?"
-if c3.button("TKT-501 SLA Breach", use_container_width=True):
-    demo_query = "What is the SLA status for TKT-501?"
-if c4.button("Cross-Account Security", use_container_width=True):
-    demo_query = "Can LumenWorks cancel Northstar's order ORD-1001?"
-
-prompt_input = st.chat_input("Ask a question regarding orders, service credits, or SLA escalations...")
-final_prompt = demo_query or prompt_input
-
-if final_prompt:
-    st.session_state.chat_history.append({"role": "user", "content": final_prompt})
-    with st.chat_message("user"):
-        st.markdown(final_prompt)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Agent evaluating request..."):
-            try:
-                structured_response = agent_service.process_message_structured(final_prompt, context)
-            except PermissionError:
-                structured_response = {
-                    "Error": "UNAUTHORIZED",
-                    "Requested": "TARGET_RESOURCE",
-                    "Scope": list(context.account_scope)[0] if context.account_scope else "NONE",
-                    "Reason": "The operational data layer rejected the request."
-                }
-            except Exception as e:
-                logger.exception("Error processing agent turn")
-                structured_response = {"Text": "An internal system error occurred while processing your request."}
-
-            if "Action" in structured_response and structured_response["Action"]:
-                st.session_state.pending_action = structured_response["Action"]
-
-            if "Error" in structured_response and structured_response["Error"] == "UNAUTHORIZED":
-                st.error("### 🛑 Access Denied")
-                st.markdown(f"**Tenant Isolation Enforced:** The active context (`{structured_response.get('Scope', 'SCOPED')}`) is not authorized to access record `{structured_response.get('Requested', 'N/A')}`.")
-            elif "Decision" in structured_response:
-                render_decision_card(structured_response)
-                render_evidence_panel(structured_response.get("Evidence") or [])
-                render_tool_trace(structured_response.get("tool_trace") or [])
-            elif structured_response.get("Text"):
-                st.markdown(structured_response["Text"])
-
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "content": structured_response.get("Text", ""),
-                "structured": structured_response
-            })
-            
+    # Render pending action requiring human confirmation
     if st.session_state.pending_action:
-        st.rerun()
+        render_action_review(st.session_state.pending_action)
+
+    # Sample prompt suggestions
+    st.markdown("##### 💡 Suggested Demo Queries")
+    c1, c2, c3, c4 = st.columns(4)
+    demo_query = None
+    if c1.button("ORD-1001 Cancellation", use_container_width=True):
+        demo_query = "Can Northstar cancel ORD-1001 without a cancellation fee?"
+    if c2.button("ORD-2001 Service Credit", use_container_width=True):
+        demo_query = "Is ORD-2001 eligible for a service credit?"
+    if c3.button("TKT-501 SLA Breach", use_container_width=True):
+        demo_query = "What is the SLA status for TKT-501?"
+    if c4.button("Cross-Account Security", use_container_width=True):
+        demo_query = "Can LumenWorks cancel Northstar's order ORD-1001?"
+
+    prompt_input = st.chat_input("Ask a question regarding orders, service credits, SLA escalations, or follow-ups...")
+    final_prompt = demo_query or prompt_input
+
+    if final_prompt:
+        st.session_state.chat_history.append({"role": "user", "content": final_prompt})
+        with st.chat_message("user"):
+            st.markdown(final_prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Agent evaluating request..."):
+                try:
+                    structured_response = agent_service.process_message_structured(
+                        final_prompt,
+                        context,
+                        chat_history=st.session_state.chat_history
+                    )
+                except PermissionError:
+                    structured_response = {
+                        "Error": "UNAUTHORIZED",
+                        "Requested": "TARGET_RESOURCE",
+                        "Scope": list(context.account_scope)[0] if context.account_scope else "NONE",
+                        "Reason": "The operational data layer rejected the request."
+                    }
+                except Exception as e:
+                    logger.exception("Error processing agent turn")
+                    structured_response = {"Text": "An internal system error occurred while processing your request."}
+
+                if "Action" in structured_response and structured_response["Action"]:
+                    st.session_state.pending_action = structured_response["Action"]
+
+                if "Error" in structured_response and structured_response["Error"] == "UNAUTHORIZED":
+                    st.error("### 🛑 Access Denied")
+                    st.markdown(f"**Tenant Isolation Enforced:** The active context (`{structured_response.get('Scope', 'SCOPED')}`) is not authorized to access record `{structured_response.get('Requested', 'N/A')}`.")
+                elif "Decision" in structured_response:
+                    render_decision_card(structured_response)
+                    render_evidence_panel(structured_response.get("Evidence") or [])
+                    render_tool_trace(structured_response.get("tool_trace") or [])
+                elif structured_response.get("Text"):
+                    st.markdown(structured_response["Text"])
+
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": structured_response.get("Text", ""),
+                    "structured": structured_response
+                })
+                
+        if st.session_state.pending_action:
+            st.rerun()
+
+# ------------------------------------------------------------
+# TAB 2: Proactive Operations Dashboard (Problem 1)
+# ------------------------------------------------------------
+with tab_proactive:
+    st.markdown("### 📊 Operational Queue Monitoring & Proactive Issue Detection")
+    st.caption("Continuously monitors queue activity relative to the frozen snapshot timestamp, detecting emerging incidents before manual customer escalation.")
+
+    insights = agent_service.get_proactive_insights(context)
+
+    # Top summary metrics
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Open Tickets", insights.get("total_open_tickets", 0))
+    m2.metric("SLA Breached", insights.get("sla_breached_count", 0), delta=f"{insights.get('sla_breached_count', 0)} Breached", delta_color="inverse")
+    m3.metric("At-Risk / Approaching", insights.get("sla_at_risk_count", 0))
+    m4.metric("Active Issue Clusters", insights.get("active_clusters_count", 0))
+
+    st.divider()
+
+    # Section 1: SLA Watchlist
+    st.markdown("#### ⏱️ Real-Time SLA Risk Watchlist")
+    watchlist = insights.get("watchlist", [])
+    if watchlist:
+        for item in watchlist:
+            risk = item["risk_status"]
+            card_color = "#FEE2E2" if risk == "BREACHED" else "#FEF3C7" if risk == "AT_RISK" else "#F1F5F9"
+            border_color = "#EF4444" if risk == "BREACHED" else "#F59E0B" if risk == "AT_RISK" else "#CBD5E1"
+            badge = "🚨 SLA BREACHED" if risk == "BREACHED" else "⚠️ AT RISK" if risk == "AT_RISK" else "⏳ SCHEDULED"
+            
+            st.markdown(
+                f"""
+                <div style="background-color:{card_color}; border:1px solid {border_color}; border-radius:8px; padding:0.8rem 1.2rem; margin-bottom:0.6rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <strong><code>{item['ticket_id']}</code> — {html.escape(item['subject'])}</strong>
+                        <span style="font-weight:700; font-size:0.8rem;">{badge}</span>
+                    </div>
+                    <div style="font-size:0.85rem; color:#475569; margin-top:0.3rem;">
+                        Account: <code>{item['account_id']}</code> | Assigned: <strong>{item['assigned_to']}</strong> | Created: <code>{item['created_at']}</code> | Elapsed: <strong>{item['elapsed_minutes']} mins</strong> (Target: {item['target_minutes'] or 'N/A'}m)
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+    else:
+        st.info("No open tickets in current authorization scope.")
+
+    st.divider()
+
+    # Section 2: Known Issue Clusters
+    st.markdown("#### 🧩 Known Issue Clustering & Systemic Anomaly Detection")
+    clusters = insights.get("clusters", [])
+    if clusters:
+        for c in clusters:
+            sev_badge = "🔴 CRITICAL" if c["severity"] == "CRITICAL" else "🟠 HIGH" if c["severity"] == "HIGH" else "🟡 MEDIUM"
+            st.markdown(
+                f"""
+                <div class="cluster-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h4 style="margin:0; color:#0F172A;">{c['cluster_id']}: {html.escape(c['title'])}</h4>
+                        <span style="font-weight:700; font-size:0.8rem;">{sev_badge}</span>
+                    </div>
+                    <p style="font-size:0.9rem; color:#475569; margin-top:0.4rem; margin-bottom:0.4rem;">
+                        <strong>Reference:</strong> <code>{html.escape(c['known_issue_ref'])}</code> | <strong>Impacted Accounts:</strong> {', '.join([f'<code>{a}</code>' for a in c['impacted_accounts']])}
+                    </p>
+                    <p style="font-size:0.9rem; margin-bottom:0.5rem;">
+                        <strong>Recommended Operational Action:</strong> {html.escape(c['recommended_action'])}
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+    else:
+        st.info("No active systemic clusters detected for current tenant scope.")

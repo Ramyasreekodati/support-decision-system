@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 from typing import Dict, Any, List, Optional
 from src.security.authorization import SecurityContext
@@ -7,13 +7,14 @@ from src.data.document_store import DocumentStore, RetrievalMode
 from src.domain.cancellation_engine import CancellationEngine
 from src.domain.service_credit_engine import ServiceCreditEngine
 from src.domain.sla_engine import SLAEngine
+from src.domain.proactive_engine import ProactiveEngine
 from src.actions.action_gateway import ActionGateway
 
 logger = logging.getLogger(__name__)
 
 class ToolDispatcher:
     """
-    Central dispatcher exposing the 7 formal tool contracts.
+    Central dispatcher exposing formal tool contracts.
     Validates schemas, permissions, and routes to deterministic domain engines.
     """
     def __init__(self, data_store: OperationalDataStore, doc_store: DocumentStore, action_gateway: ActionGateway):
@@ -22,6 +23,7 @@ class ToolDispatcher:
         self.cancellation_engine = CancellationEngine()
         self.service_credit_engine = ServiceCreditEngine()
         self.sla_engine = SLAEngine()
+        self.proactive_engine = ProactiveEngine(data_store, doc_store, self.sla_engine)
         self.action_gateway = action_gateway
         self.action_gateway.rule_engine = self.sla_engine
         self.collected_state: Dict[str, Any] = {}
@@ -107,6 +109,42 @@ class ToolDispatcher:
                     },
                     "required": ["ticket_id", "priority", "reason"]
                 }
+            },
+            {
+                "name": "prepare_ticket_update",
+                "description": "Stage a status or field update on an existing ticket. Requires human confirmation before execution.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticket_id": {"type": "string", "description": "Ticket ID to update"},
+                        "new_status": {"type": "string", "enum": ["open", "pending_customer", "escalated", "resolved", "closed"], "description": "New status for the ticket"},
+                        "comment": {"type": "string", "description": "Update comment or notes"}
+                    },
+                    "required": ["ticket_id", "new_status"]
+                }
+            },
+            {
+                "name": "prepare_followup_task",
+                "description": "Stage an operational follow-up task (e.g. carrier inquiry, billing review). Requires human confirmation.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticket_id": {"type": "string", "description": "Related Ticket ID"},
+                        "task_type": {"type": "string", "enum": ["CARRIER_DISPUTE", "BILLING_CREDIT_REVIEW", "CUSTOMER_FOLLOWUP", "ENGINEERING_INVESTIGATION"], "description": "Task category"},
+                        "description": {"type": "string", "description": "Detailed task instructions"},
+                        "assigned_team": {"type": "string", "description": "Target operations/engineering team"}
+                    },
+                    "required": ["ticket_id", "task_type", "description"]
+                }
+            },
+            {
+                "name": "get_proactive_insights",
+                "description": "Scan open tickets and operational queues for SLA risks, known issue clusters, and systemic platform anomalies.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
             }
         ]
 
@@ -140,7 +178,6 @@ class ToolDispatcher:
                 content = d.get("content", "")
                 auth = "CUSTOMER_SPECIFIC" if "Agreement" in fn else "GENERAL_POLICY"
                 
-                # Extract relevant text snippets if query keywords match
                 snippets = []
                 if query:
                     keywords = [k for k in query.split() if len(k) > 2]
@@ -227,8 +264,11 @@ class ToolDispatcher:
             ticket_id = args.get("ticket_id", "").strip().upper()
             priority = args.get("priority", "P1")
             reason = args.get("reason", "")
+            tkt = self.data_store.query_tickets(context, ticket_id)
+            acc_id = tkt.get("account_id") if tkt else None
             payload = {
                 "ticket_id": ticket_id,
+                "account_id": acc_id,
                 "priority": priority,
                 "reason": reason,
                 "action": "ESCALATE_TICKET"
@@ -246,6 +286,67 @@ class ToolDispatcher:
                 "status": "PREPARED",
                 "requires_human_confirmation": True
             }
+
+        elif tool_name == "prepare_ticket_update":
+            ticket_id = args.get("ticket_id", "").strip().upper()
+            new_status = args.get("new_status", "open")
+            comment = args.get("comment", "")
+            tkt = self.data_store.query_tickets(context, ticket_id)
+            acc_id = tkt.get("account_id") if tkt else None
+            payload = {
+                "ticket_id": ticket_id,
+                "account_id": acc_id,
+                "new_status": new_status,
+                "comment": comment,
+                "action": "UPDATE_TICKET"
+            }
+            action_id = self.action_gateway.prepare(context, payload)
+            self.collected_state["pending_action"] = {
+                "action_id": action_id,
+                "type": "UPDATE_TICKET",
+                "ticket_id": ticket_id,
+                "new_status": new_status,
+                "reason": comment or f"Update status to {new_status}"
+            }
+            return {
+                "action_id": action_id,
+                "status": "PREPARED",
+                "requires_human_confirmation": True
+            }
+
+        elif tool_name == "prepare_followup_task":
+            ticket_id = args.get("ticket_id", "").strip().upper()
+            task_type = args.get("task_type", "CARRIER_DISPUTE")
+            description = args.get("description", "")
+            assigned_team = args.get("assigned_team", "Operations")
+            tkt = self.data_store.query_tickets(context, ticket_id)
+            acc_id = tkt.get("account_id") if tkt else None
+            payload = {
+                "ticket_id": ticket_id,
+                "account_id": acc_id,
+                "task_type": task_type,
+                "description": description,
+                "assigned_team": assigned_team,
+                "action": "CREATE_TASK"
+            }
+            action_id = self.action_gateway.prepare(context, payload)
+            self.collected_state["pending_action"] = {
+                "action_id": action_id,
+                "type": "CREATE_TASK",
+                "ticket_id": ticket_id,
+                "task_type": task_type,
+                "reason": f"Task: {task_type} -> {description} (Assigned to {assigned_team})"
+            }
+            return {
+                "action_id": action_id,
+                "status": "PREPARED",
+                "requires_human_confirmation": True
+            }
+
+        elif tool_name == "get_proactive_insights":
+            insights = self.proactive_engine.get_systemic_insights(context)
+            self.collected_state["proactive_insights"] = insights
+            return insights
 
         else:
             return {"error": f"Unknown tool '{tool_name}'"}

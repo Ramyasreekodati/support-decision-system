@@ -38,5 +38,32 @@ class TestActionGateway(unittest.TestCase):
         self.assertEqual(succ_res["revalidation"]["authorization"], "PASSED")
         self.assertEqual(succ_res["revalidation"]["rule_state"], "PASSED")
 
+    def test_ticket_update_action(self):
+        payload = {
+            "ticket_id": "TKT-502",
+            "account_id": "ACCT-002",
+            "new_status": "escalated",
+            "comment": "Updating status for testing",
+            "action": "UPDATE_TICKET"
+        }
+        action_id = self.gateway.prepare(self.lw_ctx, payload)
+        res = self.gateway.approve(action_id, self.lw_ctx)
+        self.assertEqual(res["status"], "EXECUTED")
+        self.assertEqual(res["execution"]["action_type"], "UPDATE_TICKET")
+
+    def test_followup_task_action(self):
+        payload = {
+            "ticket_id": "TKT-504",
+            "account_id": "ACCT-001",
+            "task_type": "CARRIER_DISPUTE",
+            "description": "Investigate pickup confirmation lag with SwiftShip",
+            "assigned_team": "Carrier Operations",
+            "action": "CREATE_TASK"
+        }
+        action_id = self.gateway.prepare(self.admin_ctx, payload)
+        res = self.gateway.approve(action_id, self.admin_ctx)
+        self.assertEqual(res["status"], "EXECUTED")
+        self.assertEqual(res["execution"]["action_type"], "CREATE_TASK")
+
 if __name__ == '__main__':
     unittest.main()

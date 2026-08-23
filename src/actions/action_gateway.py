@@ -74,16 +74,19 @@ class ActionGateway:
 
         # 2. Record Access Recheck
         ticket_id = action["payload"].get("ticket_id")
-        try:
-            tkt = self.data_store.query_tickets(current_context, ticket_id)
-            if not tkt:
-                return {"status": "FAILED", "error": "Target record no longer accessible", "revalidation": revalidation}
-        except PermissionError:
-            return {"status": "FAILED", "error": "Target record permission denied", "revalidation": revalidation}
+        tkt = None
+        if ticket_id:
+            try:
+                tkt = self.data_store.query_tickets(current_context, ticket_id)
+                if not tkt:
+                    return {"status": "FAILED", "error": "Target record no longer accessible", "revalidation": revalidation}
+            except PermissionError:
+                return {"status": "FAILED", "error": "Target record permission denied", "revalidation": revalidation}
         revalidation["record_access"] = "PASSED"
 
         # 3. Rule State Recheck
-        if self.rule_engine:
+        action_type = action["payload"].get("action", "ESCALATE_TICKET")
+        if action_type == "ESCALATE_TICKET" and self.rule_engine and tkt:
             docs = self.doc_store.retrieve(current_context)
             sla_res = self.rule_engine.evaluate_sla(tkt, docs, current_context.snapshot_time)
             if sla_res.escalation_requirement != "REQUIRED":
@@ -95,8 +98,13 @@ class ActionGateway:
             return {"status": "FAILED", "error": "Payload hash mismatch; payload was modified in flight", "revalidation": revalidation}
         revalidation["payload_integrity"] = "PASSED"
 
-        # 5. Execute Action
+        # 5. Execute Action (apply mutation in memory store if needed)
         action["state"] = ActionState.EXECUTED
+        if action_type == "UPDATE_TICKET" and ticket_id and not self.data_store.tickets.empty:
+            new_status = action["payload"].get("new_status")
+            if new_status:
+                self.data_store.tickets.loc[self.data_store.tickets['ticket_id'] == ticket_id, 'status'] = new_status
+
         self.executed_actions.append(action)
         del self.pending_actions[action_id]
 
@@ -108,6 +116,7 @@ class ActionGateway:
                 "status": "SUCCESS",
                 "action_id": action_id,
                 "timestamp": str(current_context.snapshot_time),
+                "action_type": action_type,
                 "payload": action["payload"]
             }
         }
