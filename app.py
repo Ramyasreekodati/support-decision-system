@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import html
 from typing import Dict, Any, Optional
 
@@ -139,7 +139,7 @@ st.sidebar.markdown("### 🤖 Agent Engine Mode")
 if agent_service.is_live_mode:
     st.sidebar.success("🟢 **LIVE AGENT** — Gemini Tool Calling")
 else:
-    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**<br><span style='font-size:0.75rem; color:#64748B;'>Deterministic fixture (set <code>GEMINI_API_KEY</code> for live LLM agent)</span>", unsafe_allow_html=True)
+    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**\n\n*Deterministic fixture (set `GEMINI_API_KEY` for live LLM agent)*")
 
 st.sidebar.divider()
 
