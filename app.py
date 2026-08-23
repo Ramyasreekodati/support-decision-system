@@ -422,8 +422,6 @@ def render_trace(trace):
 def render_decision(data):
     """
     Render only information supplied by the backend.
-
-    No business logic is performed here.
     """
 
     if not data:
@@ -433,60 +431,92 @@ def render_decision(data):
         st.error(data["Text"])
         return
 
-    # Handle the backend's explicit Error output
-    if data.get("Error"):
-        st.error(f"🔐 **ACCESS DENIED**")
-        st.markdown(f"**Requested resource:** {data.get('Requested', 'UNKNOWN')}")
-        st.markdown(f"**Current account scope:** {data.get('Scope', 'NONE')}")
-        st.markdown(f"**Result:** {data.get('Error')}")
-        if data.get("Reason"):
-            st.markdown(f"**Why?**\n\n{data.get('Reason')}")
+    # --------------------------------------------------------
+    # UNAUTHORIZED (SECURITY BOUNDARY)
+    # --------------------------------------------------------
+    if data.get("Error") == "UNAUTHORIZED":
+        st.markdown(
+            f"""
+            <div style="border: 2px solid #f04438; border-radius: 8px; padding: 1.5rem; background-color: #fff5f4; margin-bottom: 1rem;">
+                <h3 style="color: #d92d20; margin-top: 0;">🔐 ACCESS DENIED</h3>
+                
+                <p><strong>Requested resource</strong><br>{data.get('Requested', 'UNKNOWN')}</p>
+                <p><strong>Current session</strong><br>{data.get('Scope', 'NONE')}</p>
+                <p><strong>Authorization</strong><br><span style="color: #d92d20; font-weight: bold;">✕ DENIED</span></p>
+                
+                <hr style="border-top: 1px solid #fecdca;">
+                
+                <p>The requested record was not returned to the model.<br>
+                No business rule was evaluated.<br>
+                No action was created.</p>
+                <p style="color: #667085; font-size: 0.9rem; margin-bottom: 0;"><i>{data.get('Reason', '')}</i></p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
         return
 
     decision = data.get("Decision", "UNKNOWN")
 
-    st.markdown(
-        f"""
-        <div class="decision-card">
-            <div class="decision-label">Decision</div>
-            <div class="decision-value">
-                {decision_title(decision)}
+    # --------------------------------------------------------
+    # UNKNOWN (LIMITATION DEMONSTRATION)
+    # --------------------------------------------------------
+    if decision == "UNKNOWN":
+        lim_html = "".join([f"<li>{l}</li>" for l in data.get('Limitations', [])])
+        st.markdown(
+            f"""
+            <div style="border: 2px solid #f79009; border-radius: 8px; padding: 1.5rem; background-color: #fffaeb; margin-bottom: 1rem;">
+                <h3 style="color: #b54708; margin-top: 0;">⚠ DECISION CANNOT BE SAFELY DETERMINED</h3>
+                <h2 style="margin-top: 0;">UNKNOWN</h2>
+                
+                <p><strong>The system will NOT invent the missing information.</strong></p>
+                
+                <hr style="border-top: 1px solid #fedf89;">
+                
+                <p><strong>Missing evidence / Policy constraints</strong></p>
+                <ul style="margin-top: 0;">
+                    {lim_html}
+                </ul>
+                
+                <hr style="border-top: 1px solid #fedf89;">
+                
+                <p style="margin-bottom: 0;"><strong>Result</strong><br>
+                No state change authorized.<br>
+                No action prepared.</p>
             </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            """,
+            unsafe_allow_html=True
+        )
 
-    if data.get("Reason"):
-        st.markdown("### Reason")
-        st.write(data["Reason"])
+    # --------------------------------------------------------
+    # NORMAL DECISION
+    # --------------------------------------------------------
+    else:
+        st.markdown(
+            f"""
+            <div style="border: 1px solid #d0d5dd; border-radius: 8px; padding: 1.5rem; background: #ffffff; margin-bottom: 1rem;">
+                <p style="color: #667085; font-size: 0.8rem; font-weight: bold; margin-bottom: 0;">INVESTIGATION RESULT</p>
+                <h2 style="color: #039855; margin-top: 0;">{decision_title(decision)}</h2>
+                <p style="margin-bottom: 0;"><strong>WHY THIS DECISION</strong><br>{data.get('Reason', '')}</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # --------------------------------------------------------
     # VERIFIED CONTEXT
     # --------------------------------------------------------
-
     if data.get("Context"):
-        st.markdown("### Verified Context")
-
+        st.markdown("### Verified Data")
         context_data = data["Context"]
-
-        cols = st.columns(
-            min(max(len(context_data), 1), 4)
-        )
-
-        for i, (key, value) in enumerate(
-            context_data.items()
-        ):
+        cols = st.columns(min(max(len(context_data), 1), 4))
+        for i, (key, value) in enumerate(context_data.items()):
             with cols[i % len(cols)]:
                 st.markdown(
                     f"""
-                    <div class="status-card">
-                        <div class="status-title">
-                            {key}
-                        </div>
-                        <div class="status-value">
-                            {value}
-                        </div>
+                    <div style="border: 1px solid #e4e7ec; border-radius: 8px; padding: 1rem; background: #f9fafb;">
+                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">{key}</div>
+                        <div style="font-size: 1.1rem; font-weight: 600;">{value}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -495,22 +525,14 @@ def render_decision(data):
     if data.get("SLA_Details"):
         st.markdown("### SLA Evaluation")
         sla_data = data["SLA_Details"]
-        cols = st.columns(
-            min(max(len(sla_data), 1), 4)
-        )
-        for i, (key, value) in enumerate(
-            sla_data.items()
-        ):
+        cols = st.columns(min(max(len(sla_data), 1), 4))
+        for i, (key, value) in enumerate(sla_data.items()):
             with cols[i % len(cols)]:
                 st.markdown(
                     f"""
-                    <div class="status-card">
-                        <div class="status-title">
-                            {key}
-                        </div>
-                        <div class="status-value">
-                            {value}
-                        </div>
+                    <div style="border: 1px solid #e4e7ec; border-radius: 8px; padding: 1rem; background: #f9fafb;">
+                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">{key}</div>
+                        <div style="font-size: 1.1rem; font-weight: 600;">{value}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -519,73 +541,35 @@ def render_decision(data):
     # --------------------------------------------------------
     # EVIDENCE
     # --------------------------------------------------------
-
     evidence = data.get("Evidence", [])
-
     if evidence:
-
         st.markdown("### Evidence")
-
         for source in evidence:
-            st.success(f"✓ {source}")
+            st.markdown(f"<div style='padding: 0.5rem; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 4px; margin-bottom: 0.5rem; color: #15803d;'>✓ {source}</div>", unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # LIMITATIONS
+    # TRACE (POLICY ENGINE)
     # --------------------------------------------------------
-
-    limitations = data.get(
-        "Limitations",
-        [],
-    )
-
-    if limitations:
-
-        st.markdown("### Limitations / Uncertainty")
-
-        for limitation in limitations:
-            st.warning(f"⚠ {limitation}")
+    trace = data.get("Trace", [])
+    if trace:
+        st.markdown("### Policy Engine Trace")
+        st.markdown("<div style='border-left: 3px solid #98a2b3; padding-left: 1rem;'>", unsafe_allow_html=True)
+        for step in trace:
+            st.markdown(f"<div style='margin-bottom: 0.5rem;'>✓ {step}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # TRACE
+    # ACTION PREPARATION FLAG
     # --------------------------------------------------------
-
-    render_trace(
-        data.get("Trace", [])
-    )
-
-    # --------------------------------------------------------
-    # ACTION
-    # --------------------------------------------------------
-
     action = data.get("Action")
-
-    if action:
-
-        status = action.get(
-            "status",
-            "UNKNOWN",
-        )
-
-        if status == "PREPARED":
-
-            st.session_state.pending_action = {
-                "action_id": action["action_id"],
-                "decision": decision,
-                "role": context.role,
-                "scope": sorted(context.account_scope),
-            }
-
-            st.markdown(
-                """
-                <div class="action-card">
-                    <strong>⚠ Human approval required</strong>
-                    <br><br>
-                    A state-changing action has been prepared.
-                    It cannot execute without explicit approval.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    if action and action.get("status") == "PREPARED":
+        st.session_state.pending_action = {
+            "action_id": action["action_id"],
+            "decision": decision,
+            "role": context.role,
+            "scope": sorted(context.account_scope),
+        }
+        # The actual action control block renders below the chat history
 
 
 def submit_prompt(prompt):
@@ -821,59 +805,47 @@ if pending:
             {},
         )
 
-        st.divider()
-
         st.markdown(
             """
-            ## ⚠ Action Requires Human Approval
-            """
+            <div style="border: 2px solid #000; border-radius: 8px; padding: 1.5rem; background-color: #ffffff; margin-top: 2rem;">
+                <h3 style="text-align: center; margin-top: 0; text-transform: uppercase;">ACTION REVIEW</h3>
+                
+                <div style="background-color: #fff5f4; color: #d92d20; padding: 0.5rem; border-radius: 4px; font-weight: bold; margin-bottom: 1rem; border: 1px solid #fecdca;">
+                    ⚠ ESCALATION REQUIRES HUMAN APPROVAL
+                </div>
+            """,
+            unsafe_allow_html=True
         )
 
-        cols = st.columns(3)
-
-        with cols[0]:
-            st.metric(
-                "Action",
-                payload.get(
-                    "action",
-                    "ESCALATE_TICKET",
-                ),
-            )
-
-        with cols[1]:
-            st.metric(
-                "Ticket",
-                payload.get(
-                    "ticket_id",
-                    "UNKNOWN",
-                ),
-            )
-
-        with cols[2]:
-            st.metric(
-                "Decision",
-                pending.get(
-                    "decision",
-                    "UNKNOWN",
-                ),
-            )
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**Ticket**<br>{payload.get('ticket_id', 'UNKNOWN')}", unsafe_allow_html=True)
+            st.markdown(f"**Priority**<br>P1", unsafe_allow_html=True) # hardcoding P1 for demo
+        with col2:
+            st.markdown(f"**Evaluation**<br>{pending.get('decision', 'UNKNOWN')}", unsafe_allow_html=True)
 
         st.markdown(
-            f"**Reason:** "
-            f"{payload.get('reason', 'Not provided')}"
+            f"""
+                <div style="border: 1px solid #e4e7ec; border-radius: 6px; padding: 1rem; background-color: #f9fafb; margin-top: 1rem;">
+                    <strong>WHY</strong><br>
+                    {payload.get('reason', 'Not provided')}
+                </div>
+                
+                <div style="margin-top: 1rem;">
+                    <strong>Action</strong><br>
+                    <code style="font-size: 1.1rem; background-color: #f2f4f7; padding: 0.2rem 0.5rem; border-radius: 4px;">{payload.get('action', 'ESCALATE_TICKET')}</code>
+                </div>
+            """,
+            unsafe_allow_html=True
         )
 
-        st.caption(
-            "Approval will trigger backend revalidation "
-            "before execution."
-        )
-
+        st.markdown("<div style='margin-top: 1.5rem;'>", unsafe_allow_html=True)
         reject_col, approve_col = st.columns(2)
 
         with reject_col:
 
             if st.button(
-                "Reject",
+                "REJECT",
                 type="secondary",
                 use_container_width=True,
             ):
@@ -902,48 +874,21 @@ if pending:
         with approve_col:
 
             if st.button(
-                "Approve Escalation",
+                "APPROVE & EXECUTE",
                 type="primary",
                 use_container_width=True,
             ):
 
                 try:
-
-                    # Support the finalized API first.
-                    if hasattr(
-                        gateway,
-                        "approve",
-                    ):
-                        result = gateway.approve(
-                            action_id,
-                            context,
-                        )
-
-                    elif hasattr(
-                        gateway,
-                        "confirm",
-                    ):
-                        result = gateway.confirm(
-                            action_id,
-                            context,
-                        )
-
+                    if hasattr(gateway, "approve"):
+                        result = gateway.approve(action_id, context)
+                    elif hasattr(gateway, "confirm"):
+                        result = gateway.confirm(action_id, context)
                     else:
-                        result = (
-                            "SYSTEM ERROR: "
-                            "No supported approval method."
-                        )
-
+                        result = "SYSTEM ERROR: No supported approval method."
                 except Exception:
-
-                    logger.exception(
-                        "Action approval failed"
-                    )
-
-                    result = (
-                        "SYSTEM ERROR: "
-                        "Action could not be executed safely."
-                    )
+                    logger.exception("Action approval failed")
+                    result = "SYSTEM ERROR: Action could not be executed safely."
                     
                 if "Action executed successfully" in result:
                     result = f"Action {action_id} EXECUTED successfully.\n\n✓ REVALIDATING\n✓ AUTHORIZED\n✓ BUSINESS RULE STILL VALID"
@@ -958,6 +903,17 @@ if pending:
                 st.session_state.pending_action = None
                 st.rerun()
 
+        st.markdown(
+            """
+                </div>
+                <div style="color: #667085; font-size: 0.9rem; text-align: center; margin-top: 1rem; border-top: 1px solid #eaecf0; padding-top: 1rem;">
+                    Approval does NOT directly execute.<br>
+                    Backend revalidates authorization + SLA before execution.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # ============================================================
 # CHAT INPUT
