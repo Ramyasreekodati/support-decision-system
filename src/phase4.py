@@ -201,7 +201,7 @@ class ActionGateway:
         }
         return action_id
         
-    def confirm(self, action_id: str, context: SecurityContext) -> str:
+    def approve(self, action_id: str, context: SecurityContext) -> str:
         if action_id not in self.pending_actions:
             return "Action not found."
         action = self.pending_actions[action_id]
@@ -364,18 +364,18 @@ class TestPhase4SLA(unittest.TestCase):
             "_mock_first_response": "2026-08-16 10:55" 
         }
         action_id = self.action_gateway.prepare(self.admin_ctx, payload)
-        res = self.action_gateway.confirm(action_id, self.admin_ctx)
+        res = self.action_gateway.approve(action_id, self.admin_ctx)
         self.assertEqual(res, "Action executed successfully.")
         
         # Duplicate execution
-        res_dup = self.action_gateway.confirm(action_id, self.admin_ctx)
+        res_dup = self.action_gateway.approve(action_id, self.admin_ctx)
         self.assertEqual(res_dup, "Action already executed (idempotent).")
 
     def test_unauthorized_execution(self):
         payload = {"action": "ESCALATE_TICKET", "ticket_id": "TKT-504"} # ACCT-001
         action_id = self.action_gateway.prepare(self.admin_ctx, payload)
         # Attempt to confirm as customer (not authorized)
-        res = self.action_gateway.confirm(action_id, self.lw_ctx) # ACCT-002
+        res = self.action_gateway.approve(action_id, self.lw_ctx) # ACCT-002
         self.assertEqual(res, "Unauthorized confirmation.")
 
     def test_tampered_payload_revalidation_failure(self):
@@ -386,7 +386,7 @@ class TestPhase4SLA(unittest.TestCase):
             "_mock_first_response": "2026-08-16 10:55"
         }
         action_id = self.action_gateway.prepare(self.admin_ctx, payload)
-        res = self.action_gateway.confirm(action_id, self.admin_ctx)
+        res = self.action_gateway.approve(action_id, self.admin_ctx)
         self.assertEqual(res, "Revalidation failed: Tampered payload.")
 
 if __name__ == '__main__':

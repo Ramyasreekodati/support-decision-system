@@ -20,12 +20,17 @@ lw_ctx = SecurityContext("customer", frozenset(["ACCT-002"]), snapshot)
 
 def simulate_ui_chat(prompt, context):
     print(f"\n[User]: {prompt}")
-    reply = agent.process_message(prompt, context)
-    print(f"[Agent]:\n{reply}")
+    try:
+        structured = agent.process_message_structured(prompt, context)
+    except PermissionError:
+        structured = {"Text": "UNAUTHORIZED: You do not have permission to access this record."}
+        
+    print("[Agent]")
+    print(structured)
     
-    # Action simulation
-    if "Action ID:" in reply:
-        action_id = reply.split("Action ID:")[1].strip()
+    action = structured.get("Action")
+    if action and action.get("status") == "PREPARED":
+        action_id = action["action_id"]
         print(f"\n[UI rendered Approve/Reject buttons for Action: {action_id}]")
         return action_id
     return None
@@ -54,8 +59,8 @@ print(f"Action State after Reject execution: {len(gateway.executed_actions)} exe
 
 action_id_2 = simulate_ui_chat("SLA for TKT-999", admin_ctx)
 print("\n[User clicks Approve]")
-gateway.confirm(action_id_2, admin_ctx)
-gateway.revalidate_and_execute(action_id_2, admin_ctx)
+res = gateway.approve(action_id_2, admin_ctx)
+print(f"Action Execution Result: {res}")
 print(f"Action State after Approve execution: {len(gateway.executed_actions)} executed.")
 data.query_tickets = original
 

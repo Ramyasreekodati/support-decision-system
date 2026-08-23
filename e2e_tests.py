@@ -80,8 +80,8 @@ class TestEndToEnd(unittest.TestCase):
         reply = self.agent.process_message("Escalate TKT-999", self.admin_ctx)
         action_id = reply.split("Action ID:")[1].strip()
         
-        # confirm automatically calls revalidate_and_execute
-        res = self.gateway.confirm(action_id, self.admin_ctx)
+        # approve automatically calls revalidate_and_execute
+        res = self.gateway.approve(action_id, self.admin_ctx)
         self.assertEqual(res, "Action executed successfully.")
         self.assertEqual(len(self.gateway.executed_actions), 1)
         self.data.query_tickets = original_query
