@@ -148,6 +148,7 @@ class AgentOrchestrator:
                 
             explanation = self.explain_decision_structured(final_result)
             explanation["tool_trace"] = tool_trace
+            explanation["Intent"] = intent or "unknown"
             explanation["Context"] = {
                 "Role": context.role,
                 "Scope": list(context.account_scope)[0] if context.account_scope else "NONE",
@@ -201,36 +202,53 @@ class AgentOrchestrator:
         explanation = {}
         type_name = type(result).__name__
         if type_name == "DecisionResult":
-            explanation["Decision"] = getattr(result, "decision", "UNKNOWN")
+            decision = getattr(result, "decision", "UNKNOWN")
             amount = getattr(result, "amount", None)
             rule = getattr(result, "applicable_rule", "none")
+            explanation["Decision"] = decision
             
-            if explanation["Decision"] == "UNKNOWN":
-                explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
+            if decision == "CANCELLATION_ALLOWED":
+                fee_str = f"₹{amount}" if amount is not None else "₹0"
+                explanation["Reason"] = f"Fee: {fee_str} · Rule: {rule}"
+            elif decision == "CANCELLATION_NOT_ALLOWED":
+                explanation["Reason"] = f"Cancellation not permitted · Rule: {rule}"
             else:
-                if rule != "general_cancellation_sop" or amount == 250:
-                    explanation["Reason"] = f"Cancellation fee evaluates to {amount} based on {rule}." 
-                else:
-                    explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
+                explanation["Reason"] = f"Rule: {rule}"
             
             explanation["Evidence"] = getattr(result, "evidence", [])
             explanation["Limitations"] = getattr(result, "limitations", [])
+            explanation["ConflictDetected"] = False
             explanation["Action"] = None
+
         elif type_name == "ServiceCreditDecision":
-            explanation["Decision"] = getattr(result, "eligibility", "UNKNOWN")
+            decision = getattr(result, "eligibility", "UNKNOWN")
             amount = getattr(result, "credit_amount", None)
             rule = getattr(result, "applicable_rule", "none")
+            conflict = getattr(result, "conflict_detected", False)
             
-            explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
-            
+            explanation["Decision"] = decision
+            if amount is not None:
+                explanation["Reason"] = f"Credit amount: ₹{amount} · Rule: {rule}"
+            else:
+                explanation["Reason"] = f"Rule: {rule}"
             explanation["Evidence"] = getattr(result, "evidence", [])
             explanation["Limitations"] = getattr(result, "limitations", [])
+            explanation["ConflictDetected"] = conflict
             explanation["Action"] = None
+
         elif type_name == "SLADecision":
-            explanation["Decision"] = getattr(result, "state", "UNKNOWN")
-            explanation["Reason"] = f"Deadline is {getattr(result, 'deadline', None)}. Escalation requirement: {getattr(result, 'escalation_requirement', 'none')}."
+            state = getattr(result, "state", "UNKNOWN")
+            deadline = getattr(result, "deadline", None)
+            actual = getattr(result, "actual_response_time", None)
+            req = getattr(result, "escalation_requirement", "none")
+            explanation["Decision"] = state
+            if actual is not None:
+                explanation["Reason"] = f"Actual response: {actual} min · Deadline: {deadline} · Escalation: {req}"
+            else:
+                explanation["Reason"] = f"Deadline: {deadline} · Escalation: {req}"
             explanation["Evidence"] = getattr(result, "evidence", [])
             explanation["Limitations"] = getattr(result, "limitations", [])
+            explanation["ConflictDetected"] = False
             
             if hasattr(result, 'pending_action') and result.pending_action:
                 payload = getattr(result, 'escalation_payload', None) or {}
@@ -238,7 +256,9 @@ class AgentOrchestrator:
                     "status": "PREPARED",
                     "action_id": result.pending_action,
                     "type": "ESCALATE_TICKET",
-                    "ticket_id": payload.get('ticket_id', 'UNKNOWN')
+                    "ticket_id": payload.get('ticket_id', 'UNKNOWN'),
+                    "priority": payload.get('priority', 'P1'),
+                    "reason": payload.get('reason', '')
                 }
             else:
                 explanation["Action"] = None

@@ -204,7 +204,7 @@ def get_data_store():
 
 @st.cache_resource
 def _discover_test_count() -> int:
-    """Count passing tests across all Phase suites at startup — no hardcoding."""
+    """Count passing tests across all Phase suites and E2E at startup — no hardcoding."""
     import unittest, io
     loader = unittest.TestLoader()
     suites = [
@@ -212,6 +212,7 @@ def _discover_test_count() -> int:
         loader.loadTestsFromName("src.phase3"),
         loader.loadTestsFromName("src.phase4"),
         loader.loadTestsFromName("src.phase5"),
+        loader.loadTestsFromName("e2e_tests"),
     ]
     suite = unittest.TestSuite(suites)
     buf = io.StringIO()
@@ -357,6 +358,16 @@ st.sidebar.markdown("### Assessment Snapshot")
 st.sidebar.code(
     context.snapshot_time.strftime("%d %b %Y · %H:%M IST")
 )
+
+st.sidebar.divider()
+
+st.sidebar.markdown("### Authorization Status")
+
+if role == "support_admin":
+    st.sidebar.success("✓ FULL ACCESS — All accounts")
+else:
+    scope_str = list(context.account_scope)[0] if context.account_scope else "NONE"
+    st.sidebar.info(f"✓ SCOPED — {scope_str} only")
 
 st.sidebar.caption(
     "Production identity would be supplied by an "
@@ -525,23 +536,39 @@ def render_decision(data):
         )
     else:
         border_color = "#039855" if decision in ("CANCELLATION_ALLOWED", "ELIGIBLE", "NOT_BREACHED", "NOT_DUE") else "#d92d20"
+        conflict = data.get("ConflictDetected", False)
+        conflict_html = "<br><span style='color: #b54708; font-size: 0.9rem; font-weight: 600;'>⚠ CONFLICT DETECTED in source data</span>" if conflict else ""
         st.markdown(
             f"""
             <div style="border: 2px solid {border_color}; border-radius: 8px; padding: 1.5rem; background: #ffffff; margin-bottom: 1rem;">
                 <p style="color: #667085; font-size: 0.8rem; font-weight: bold; margin-bottom: 0; text-transform: uppercase;">Decision</p>
                 <h2 style="color: {border_color}; margin-top: 0;">{decision_title(decision)}</h2>
-                <p style="margin-bottom: 0;"><strong>Why</strong><br>{data.get('Reason', '')}</p>
+                <p style="margin-bottom: 0;"><strong>Why</strong><br>{data.get('Reason', '')}{conflict_html}</p>
             </div>
             """,
             unsafe_allow_html=True
         )
 
     # --------------------------------------------------------
-    # 2. AGENT ACTIVITY (tool trace — how the decision was reached)
+    # 2. AGENT ACTIVITY (intent + tool trace)
     # --------------------------------------------------------
     tool_trace = data.get("tool_trace", [])
-    if tool_trace:
+    intent = data.get("Intent", "")
+    if tool_trace or intent:
         st.markdown("### Agent Activity")
+        if intent:
+            intent_labels = {
+                "cancellation": "Order Cancellation",
+                "service_credit": "Service Credit",
+                "sla": "SLA Investigation",
+            }
+            st.markdown(
+                f"<div style='margin-bottom: 0.8rem; padding: 0.5rem 0.8rem; background: #f9fafb; border: 1px solid #eaecf0; border-radius: 4px;'>"
+                f"<span style='font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;'>Intent detected</span><br>"
+                f"<strong>{intent_labels.get(intent, intent)}</strong>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
         st.markdown("<div style='border-left: 3px solid #98a2b3; padding-left: 1rem;'>", unsafe_allow_html=True)
         for step in tool_trace:
             tool_name = step.get('tool', '')
@@ -685,16 +712,14 @@ def submit_prompt(prompt):
 if not st.session_state.messages:
 
     st.markdown(
-        """
-        <div class="hero" style="text-align: center; padding-top: 2rem;">
-            <h1 style="font-size: 3rem;">PARCELPILOT</h1>
-            <h3 style="color: #667085; font-weight: 500;">AI OPERATIONS CONTROL CENTER</h3>
-            <p style="margin-top: 1rem; font-size: 1.1rem;">
-                Trusted operational decisions with deterministic<br>
-                policy enforcement and human-gated execution.
-            </p>
-        </div>
-        """,
+        """<div class="hero" style="text-align: center; padding-top: 2rem;">
+<h1 style="font-size: 3rem;">PARCELPILOT</h1>
+<h3 style="color: #667085; font-weight: 500;">AI OPERATIONS CONTROL CENTER</h3>
+<p style="margin-top: 1rem; font-size: 1.1rem;">
+Trusted operational decisions with deterministic<br>
+policy enforcement and human-gated execution.
+</p>
+</div>""",
         unsafe_allow_html=True,
     )
     
@@ -703,52 +728,48 @@ if not st.session_state.messages:
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(
-            f"""
-            <div style="text-align: right; padding-right: 2rem; border-right: 1px solid #eaecf0;">
-                <h2 style="color: #039855; margin-bottom: 0;">{_test_count}</h2>
-                <p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Tests Passing</p>
-            </div>
-            """, unsafe_allow_html=True
+            f"""<div style="text-align: right; padding-right: 2rem; border-right: 1px solid #eaecf0;">
+<h2 style="color: #039855; margin-bottom: 0;">{_test_count}</h2>
+<p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Tests Passing</p>
+</div>""",
+            unsafe_allow_html=True
         )
     with col2:
         st.markdown(
-            """
-            <div style="text-align: left; padding-left: 2rem;">
-                <h2 style="color: #039855; margin-bottom: 0;">0</h2>
-                <p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Regressions</p>
-            </div>
-            """, unsafe_allow_html=True
+            """<div style="text-align: left; padding-left: 2rem;">
+<h2 style="color: #039855; margin-bottom: 0;">0</h2>
+<p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Regressions</p>
+</div>""",
+            unsafe_allow_html=True
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     st.markdown(
-        """
-        <div style="display: flex; justify-content: center; margin-bottom: 2rem;">
-            <div style="background: #f9fafb; border: 1px solid #eaecf0; border-radius: 12px; padding: 1.5rem; width: 600px; text-align: left;">
-                <h4 style="margin-top: 0; color: #344054; text-align: center; text-transform: uppercase;">What this system proves</h4>
-                <hr style="border-top: 1px solid #eaecf0;">
-                
-                <p style="margin-bottom: 0.8rem;"><strong>🔐 Authorization</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Only authorized data is retrieved.</span></p>
+        """<div style="display: flex; justify-content: center; margin-bottom: 2rem;">
+<div style="background: #f9fafb; border: 1px solid #eaecf0; border-radius: 12px; padding: 1.5rem; width: 600px; text-align: left;">
+<h4 style="margin-top: 0; color: #344054; text-align: center; text-transform: uppercase;">What this system proves</h4>
+<hr style="border-top: 1px solid #eaecf0;">
 
-                <p style="margin-bottom: 0.8rem;"><strong>📚 Evidence</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Decisions cite the actual source documents.</span></p>
+<p style="margin-bottom: 0.8rem;"><strong>🔐 Authorization</strong><br>
+<span style="color: #667085; font-size: 0.95rem;">Only authorized data is retrieved.</span></p>
 
-                <p style="margin-bottom: 0.8rem;"><strong>⚙ Deterministic rules</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Business decisions are not delegated to the LLM.</span></p>
+<p style="margin-bottom: 0.8rem;"><strong>📚 Evidence</strong><br>
+<span style="color: #667085; font-size: 0.95rem;">Decisions cite the actual source documents.</span></p>
 
-                <p style="margin-bottom: 0.8rem;"><strong>⚠ Uncertainty</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Missing/conflicting evidence produces UNKNOWN.</span></p>
+<p style="margin-bottom: 0.8rem;"><strong>⚙ Deterministic rules</strong><br>
+<span style="color: #667085; font-size: 0.95rem;">Business decisions are not delegated to the LLM.</span></p>
 
-                <p style="margin-bottom: 0.8rem;"><strong>👤 Human control</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">State-changing actions require approval.</span></p>
+<p style="margin-bottom: 0.8rem;"><strong>⚠ Uncertainty</strong><br>
+<span style="color: #667085; font-size: 0.95rem;">Missing/conflicting evidence produces UNKNOWN.</span></p>
 
-                <p style="margin-bottom: 0;"><strong>🔄 Revalidation</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Authorization and rules are checked again before execution.</span></p>
-            </div>
-        </div>
-        """,
+<p style="margin-bottom: 0.8rem;"><strong>👤 Human control</strong><br>
+<span style="color: #667085; font-size: 0.95rem;">State-changing actions require approval.</span></p>
+
+<p style="margin-bottom: 0;"><strong>🔄 Revalidation</strong><br>
+<span style="color: #667085; font-size: 0.95rem;">Authorization and rules are checked again before execution.</span></p>
+</div>
+</div>""",
         unsafe_allow_html=True,
     )
     
@@ -879,25 +900,33 @@ if pending:
             unsafe_allow_html=True
         )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"**Ticket**<br>{payload.get('ticket_id', 'UNKNOWN')}", unsafe_allow_html=True)
-            priority = payload.get("priority", "P1")  # backend-provided; default P1 for escalation actions
-            st.markdown(f"**Priority**<br>{priority}", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"**Evaluation**<br>{pending.get('decision', 'UNKNOWN')}", unsafe_allow_html=True)
-
         st.markdown(
             f"""
-                <div style="border: 1px solid #e4e7ec; border-radius: 6px; padding: 1rem; background-color: #f9fafb; margin-top: 1rem;">
-                    <strong>WHY</strong><br>
+            <div style="margin-bottom: 1rem;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.8rem; margin-bottom: 1rem;">
+                    <div>
+                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Action Type</div>
+                        <code style="font-size: 0.95rem;">{payload.get('action', 'ESCALATE_TICKET')}</code>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Target</div>
+                        <div style="font-weight: 600;">{payload.get('ticket_id', 'UNKNOWN')}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Priority</div>
+                        <div style="font-weight: 600; color: #d92d20;">{payload.get('priority', 'P1')}</div>
+                    </div>
+                </div>
+                <div style="border: 1px solid #e4e7ec; border-radius: 6px; padding: 1rem; background-color: #f9fafb; margin-bottom: 0.8rem;">
+                    <strong>Reason for action</strong><br>
                     {payload.get('reason', 'Not provided')}
                 </div>
-                
-                <div style="margin-top: 1rem;">
-                    <strong>Action</strong><br>
-                    <code style="font-size: 1.1rem; background-color: #f2f4f7; padding: 0.2rem 0.5rem; border-radius: 4px;">{payload.get('action', 'ESCALATE_TICKET')}</code>
+                <div style="border: 1px solid #e4e7ec; border-radius: 6px; padding: 0.6rem 1rem; background-color: #f9fafb;">
+                    <span style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Action ID</span><br>
+                    <code>{action_id}</code> &nbsp;
+                    <span style="background: #fef3c7; color: #b45309; font-size: 0.8rem; font-weight: bold; padding: 0.15rem 0.4rem; border-radius: 3px; text-transform: uppercase;">PREPARED</span>
                 </div>
+            </div>
             """,
             unsafe_allow_html=True
         )

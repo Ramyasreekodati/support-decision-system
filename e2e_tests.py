@@ -22,7 +22,7 @@ class TestEndToEnd(unittest.TestCase):
     def test_e2e_1_northstar_cancellation(self):
         reply = self.agent.process_message("Can I cancel ORD-1001?", self.admin_ctx)
         self.assertIn("Decision: CANCELLATION_ALLOWED", reply)
-        self.assertIn("Cancellation fee evaluates to 0", reply)
+        self.assertIn("northstar_cancellation_override", reply)
         
     # 2. LumenWorks service-credit workflow
     def test_e2e_2_lumenworks_credit(self):
