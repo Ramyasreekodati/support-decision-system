@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass
+from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 import pandas as pd
@@ -16,11 +16,11 @@ class DecisionResult:
 class CancellationEngine:
     def evaluate_cancellation(self, order_facts: dict, docs: List[dict], snapshot_time: datetime) -> DecisionResult:
         status = order_facts.get('order_status', order_facts.get('status'))
-        created_at_raw = order_facts.get('order_created_at', order_facts.get('created_at'))
+        created_at_raw = order_facts.get('booked_at', order_facts.get('order_created_at', order_facts.get('created_at')))
         account_id = order_facts.get('account_id')
         
         if pd.isna(created_at_raw) or created_at_raw is None:
-            return DecisionResult("UNKNOWN", None, "none", [], ["Missing order_created_at timestamp."])
+            return DecisionResult("UNKNOWN", None, "none", [], ["Missing order booking timestamp."])
 
         created_at = pd.to_datetime(created_at_raw)
         if created_at.tzinfo is None:

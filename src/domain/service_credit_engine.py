@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass
+from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 import pandas as pd
@@ -27,8 +27,14 @@ class ServiceCreditEngine:
         shipment_fee = order_facts.get('shipment_fee_inr')
         
         window_end_raw = order_facts.get('pickup_window_end')
-        window_end = pd.to_datetime(window_end_raw).tz_localize(IST) if not pd.isna(window_end_raw) else None
-        actual_pickup = order_facts.get('pickup_actual_at')
+        evidence = []
+        conditions_checked = []
+        conditions_missing = []
+        limitations = []
+        
+        if carrier_fault_conflict or customer_fault_conflict:
+            limitations.append("Trusted sources contain conflicting fault information.")
+            return ServiceCreditDecision("UNKNOWN", None, "conflict_resolution_required", conditions_checked, conditions_missing, None, "UNKNOWN", evidence, True, limitations)
 
         if window_end is None:
             return ServiceCreditDecision("UNKNOWN", None, "none", [], ["pickup_window_end"], None, "UNKNOWN", [], False, ["Missing pickup window."])
@@ -40,14 +46,7 @@ class ServiceCreditEngine:
         if actual_pickup_dt.tzinfo is None:
             actual_pickup_dt = actual_pickup_dt.tz_localize(IST)
         delay_hours = (actual_pickup_dt - window_end).total_seconds() / 3600.0
-
-        filenames = [d.get('metadata', {}).get('filename', '') for d in docs]
-        has_sop = any("03_Cancellation_and_Service_Credit_SOP_v4" in fn for fn in filenames)
-        has_nw_agmt = any("05_Northstar_Logistics_Enterprise_Agreement" in fn for fn in filenames)
-        has_lw_agmt = any("06_LumenWorks_Service_Agreement" in fn for fn in filenames)
-
-        evidence = []
-        conditions_checked = [f"Pickup delay: {delay_hours:.2f} hours"]
+        conditions_checked.append(f"Pickup delay: {delay_hours:.2f} hours")
         conditions_missing = []
         limitations = []
         
