@@ -1,1055 +1,347 @@
-import logging
-import pathlib
-import sys
-from datetime import datetime
+﻿import logging
+import html
+from typing import Dict, Any, Optional
 
 import streamlit as st
-
-# ============================================================
-# PATH / IMPORTS
-# ============================================================
-
-ROOT = pathlib.Path(__file__).resolve().parent
-SRC = ROOT / "src"
-
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
-
-from src.security.authorization import (
-    SecurityContext,
-    IST,
-)
-from src.data.document_store import DocumentStore
-from src.data.operational_store import OperationalDataStore
-from src.actions.action_gateway import ActionGateway
-from src.agent.agent_service import AgentService as AgentOrchestrator
-
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
+from src.security.authorization import SecurityContext
+from src.agent.agent_service import get_agent_service, AgentService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(
-    page_title="ParcelPilot Support Agent",
+    page_title="ParcelPilot Support System",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-DATA_PATH = ROOT / "ParcelPilot_Assessment_Data.xlsx"
-
-
-
-# ============================================================
-# CUSTOM CSS
-# ============================================================
-
+# ------------------------------------------------------------
+# Custom CSS (Presentation Styling Only)
+# ------------------------------------------------------------
 st.markdown(
     """
     <style>
-
-    /* ---------- Global ---------- */
-
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        max-width: 1400px;
-    }
-
-    /* ---------- Header ---------- */
-
-    .hero {
-        padding: 1.5rem 0 1.2rem 0;
-    }
-
-    .hero h1 {
-        font-size: 2.5rem;
-        margin-bottom: 0.2rem;
-    }
-
-    .hero p {
-        color: #667085;
-        font-size: 1.05rem;
-        margin-top: 0;
-    }
-
-    /* ---------- Status cards ---------- */
-
-    .status-card {
-        border: 1px solid #e4e7ec;
+    .hero-box {
+        padding: 1.5rem 2rem;
+        background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+        color: white;
         border-radius: 12px;
-        padding: 1rem;
-        background: white;
-        margin-bottom: 0.8rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-
-    .status-title {
-        font-size: 0.78rem;
-        color: #667085;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-weight: 600;
-    }
-
-    .status-value {
-        font-size: 1.05rem;
-        font-weight: 650;
-        margin-top: 0.25rem;
-    }
-
-    /* ---------- Decision ---------- */
-
-    .decision-card {
-        border: 1px solid #d0d5dd;
-        border-radius: 14px;
-        padding: 1.4rem;
-        background: #ffffff;
-        margin: 1rem 0;
-    }
-
-    .decision-label {
-        color: #667085;
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-    }
-
-    .decision-value {
+    .hero-title {
         font-size: 1.8rem;
-        font-weight: 750;
-        margin-top: 0.25rem;
-    }
-
-    /* ---------- Section ---------- */
-
-    .section-title {
-        font-size: 1.05rem;
         font-weight: 700;
-        margin-top: 1.2rem;
-        margin-bottom: 0.5rem;
+        margin: 0;
+        color: #F8FAFC;
     }
-
-    /* ---------- Welcome ---------- */
-
-    .welcome-box {
-        border: 1px solid #e4e7ec;
-        border-radius: 16px;
-        padding: 1.6rem;
-        background: #fafafa;
-        margin-top: 1rem;
+    .hero-subtitle {
+        font-size: 0.95rem;
+        color: #94A3B8;
+        margin-top: 0.4rem;
+        margin-bottom: 0;
     }
-
-    .example-box {
-        border: 1px solid #eaecf0;
-        border-radius: 10px;
-        padding: 0.8rem;
-        background: white;
-        margin-bottom: 0.6rem;
+    .badge-customer {
+        display: inline-block;
+        padding: 0.2rem 0.6rem;
+        background-color: #EDE9FE;
+        color: #6D28D9;
+        font-weight: 600;
+        font-size: 0.75rem;
+        border-radius: 6px;
+        border: 1px solid #DDD6FE;
     }
-
-    /* ---------- Trace ---------- */
-
-    .trace-step {
-        border-left: 3px solid #98a2b3;
-        padding: 0.5rem 0 0.5rem 1rem;
-        margin-bottom: 0.4rem;
+    .badge-general {
+        display: inline-block;
+        padding: 0.2rem 0.6rem;
+        background-color: #F1F5F9;
+        color: #475569;
+        font-weight: 600;
+        font-size: 0.75rem;
+        border-radius: 6px;
+        border: 1px solid #E2E8F0;
     }
-
-    /* ---------- Action ---------- */
-
     .action-card {
-        border: 2px solid #f04438;
-        border-radius: 14px;
+        border: 2px solid #F59E0B;
+        background-color: #FFFBEB;
+        border-radius: 8px;
         padding: 1.2rem;
-        background: #fff5f4;
         margin: 1rem 0;
     }
-
+    .trace-item {
+        background-color: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        border-radius: 6px;
+        padding: 0.6rem 0.8rem;
+        margin-bottom: 0.5rem;
+        font-family: monospace;
+        font-size: 0.85rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+# ------------------------------------------------------------
+# Service & Session Initialization
+# ------------------------------------------------------------
+agent_service: AgentService = get_agent_service()
+snapshot_time = agent_service.get_snapshot_time()
 
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 if "pending_action" not in st.session_state:
     st.session_state.pending_action = None
-
 if "last_context_key" not in st.session_state:
     st.session_state.last_context_key = None
 
-
-# ============================================================
-# BACKEND
-# ============================================================
-
-@st.cache_resource
-def get_data_store():
-    return OperationalDataStore(DATA_PATH)
-
-
-@st.cache_resource
-def _discover_test_count() -> int:
-    """Count passing tests across all Phase suites at startup — no hardcoding."""
-    import unittest, io
-    loader = unittest.TestLoader()
-    suites = [
-        loader.loadTestsFromName("src.phase2_verification"),
-        loader.loadTestsFromName("src.phase3"),
-        loader.loadTestsFromName("src.phase4"),
-        loader.loadTestsFromName("src.phase5"),
-    ]
-    suite = unittest.TestSuite(suites)
-    buf = io.StringIO()
-    runner = unittest.TextTestRunner(stream=buf, verbosity=0)
-    result = runner.run(suite)
-    return result.testsRun - len(result.failures) - len(result.errors)
-
-_test_count = _discover_test_count()
-
-
-@st.cache_resource
-def get_document_store():
-    return DocumentStore()
-
-
-def get_backend():
-    """
-    Build the session's agent + action gateway.
-
-    Data/document stores are read-only resources.
-    The action gateway remains session-specific.
-    """
-
-    data = get_data_store()
-    docs = get_document_store()
-
-    if "gateway" not in st.session_state:
-        st.session_state.gateway = ActionGateway(
-            data,
-            docs,
-            None,
-        )
-
-    gateway = st.session_state.gateway
-
-    agent = AgentOrchestrator(
-        data,
-        docs,
-        gateway,
-    )
-
-    if hasattr(agent, "dispatcher"):
-        gateway.rule_engine = agent.dispatcher.sla_engine
-    elif hasattr(agent, "p4_engine"):
-        gateway.rule_engine = agent.p4_engine
-
-    return agent, gateway
-
-
-agent, gateway = get_backend()
-
-
-# ============================================================
-# SECURITY CONTEXT
-# ============================================================
-
-st.sidebar.markdown("## Simulation Context")
-
-st.sidebar.caption(
-    "Assessment environment — identity and account scope are mocked."
-)
+# ------------------------------------------------------------
+# Sidebar: Identity & System Guardrails
+# ------------------------------------------------------------
+st.sidebar.markdown("## 🛡️ Identity & Security")
 
 role = st.sidebar.selectbox(
-    "Role",
-    [
-        "customer",
-        "support_agent",
-        "support_admin",
-    ],
-    index=1,
+    "Active Role",
+    options=["support_admin", "customer"],
+    format_func=lambda r: "Support Admin (Full Access)" if r == "support_admin" else "Customer (Scoped)",
+    help="Demo identity selector for constructing the request SecurityContext."
 )
 
 if role == "support_admin":
-
-    st.sidebar.markdown("**Account Scope**")
-    st.sidebar.success("ALL ACCOUNTS")
-
     scope = frozenset(["ALL"])
-
+    account_label = "ALL Accounts (Support Admin)"
+    st.sidebar.success("✓ Authorization: FULL ACCESS (All Accounts)")
 else:
-
-    account = st.sidebar.selectbox(
-        "Account Scope",
-        [
-            "ACCT-001 (Northstar)",
-            "ACCT-002 (LumenWorks)",
-        ],
+    account_choice = st.sidebar.selectbox(
+        "Tenant Account",
+        options=["ACCT-001", "ACCT-002"],
+        format_func=lambda a: f"{a} — Northstar Logistics" if a == "ACCT-001" else f"{a} — LumenWorks Inc."
     )
-
-    account_id = account.split(" ")[0]
-
-    scope = frozenset([account_id])
-
+    scope = frozenset([account_choice])
+    account_label = account_choice
+    st.sidebar.info(f"✓ Authorization: SCOPED ({account_choice} only)")
 
 context = SecurityContext(
     role=role,
     account_scope=scope,
-    snapshot_time=get_data_store().get_snapshot_time(),
+    snapshot_time=snapshot_time,
 )
 
-
-# ============================================================
-# CONTEXT CHANGE HANDLING
-# ============================================================
-
-context_key = (
-    context.role,
-    tuple(sorted(context.account_scope)),
-    context.snapshot_time.isoformat(),
-)
-
-if (
-    st.session_state.last_context_key is not None
-    and st.session_state.last_context_key != context_key
-):
-
-    # Pending actions must not survive a security-context change.
+context_key = f"{role}:{sorted(list(scope))}"
+if st.session_state.last_context_key != context_key:
     st.session_state.pending_action = None
-
-st.session_state.last_context_key = context_key
-
-
-# ============================================================
-# SIDEBAR — SYSTEM STATUS
-# ============================================================
+    st.session_state.last_context_key = context_key
 
 st.sidebar.divider()
 
-st.sidebar.markdown("### Agent Engine Mode")
-
-if getattr(agent, "service", None) and agent.service.is_live_mode:
-    st.sidebar.success("🤖 **LIVE AGENT** — Gemini Tool Calling")
+st.sidebar.markdown("### 🤖 Agent Engine Mode")
+if agent_service.is_live_mode:
+    st.sidebar.success("🟢 **LIVE AGENT** — Gemini Tool Calling")
 else:
-    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**<br><span style='font-size:0.8rem; color:#667085;'>Deterministic test fixture (set <code>GEMINI_API_KEY</code> for live LLM agent)</span>", unsafe_allow_html=True)
+    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**<br><span style='font-size:0.75rem; color:#64748B;'>Deterministic fixture (set <code>GEMINI_API_KEY</code> for live LLM agent)</span>", unsafe_allow_html=True)
 
 st.sidebar.divider()
 
-st.sidebar.markdown("### System Guardrails")
-
-st.sidebar.markdown(
-    """
-    🟢 **Account-scoped data**  
-    🟢 **Scoped document retrieval**  
-    🟢 **Fixed assessment snapshot**  
-    🟢 **Deterministic rule evaluation**  
-    🟢 **Human approval for actions**
-    """
-)
+st.sidebar.markdown("### ⏱️ Dataset Snapshot")
+st.sidebar.code(snapshot_time.strftime("%d %b %Y · %H:%M IST"))
 
 st.sidebar.divider()
 
-st.sidebar.markdown("### Assessment Snapshot")
+if st.sidebar.button("🧹 Clear Conversation", use_container_width=True):
+    st.session_state.chat_history = []
+    st.session_state.pending_action = None
+    st.rerun()
 
-st.sidebar.code(
-    context.snapshot_time.strftime("%d %b %Y · %H:%M IST")
-)
-
-st.sidebar.divider()
-
-st.sidebar.markdown("### Authorization Status")
-
-if role == "support_admin":
-    st.sidebar.success("✓ FULL ACCESS — All accounts")
-else:
-    scope_str = list(context.account_scope)[0] if context.account_scope else "NONE"
-    st.sidebar.info(f"✓ SCOPED — {scope_str} only")
-
-st.sidebar.caption(
-    "Production identity would be supplied by an "
-    "identity provider/session token."
-)
-
-
-# ============================================================
-# HEADER
-# ============================================================
-
+# ------------------------------------------------------------
+# Header
+# ------------------------------------------------------------
 st.markdown(
     """
-    <div class="hero">
-        <h1>📦 ParcelPilot Support Agent</h1>
-        <p>
-            Trust-aware AI for operational support,
-            investigation, and controlled escalation.
-        </p>
+    <div class="hero-box">
+        <h1 class="hero-title">📦 ParcelPilot Support Agent</h1>
+        <p class="hero-subtitle">Production-grade AI Support Decision System with deterministic safety boundaries and human-in-the-loop action governance.</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
-def reset_conversation():
-    st.session_state.messages = []
-    st.session_state.pending_action = None
-
-
-def decision_title(decision):
-    labels = {
-        "CANCELLATION_ALLOWED": "Cancellation Allowed",
-        "ELIGIBLE": "Service Credit Eligible",
-        "UNKNOWN": "Unable to Determine Safely",
-        "BREACHED": "SLA Breached",
-        "NOT_BREACHED": "SLA Not Breached",
-        "DEADLINE_ELAPSED": "SLA Deadline Elapsed",
-        "NOT_DUE": "SLA Deadline Not Reached",
-        "BUSINESS_TIME_CALCULATION_UNSPECIFIED":
-            "Business-Time Calculation Unspecified",
-        "UNAUTHORIZED": "Unauthorized",
-    }
-
-    return labels.get(decision, decision)
-
-
-def render_list(items):
-    if not items:
+# ------------------------------------------------------------
+# Core UI Rendering Helpers
+# ------------------------------------------------------------
+def render_decision_card(data: Dict[str, Any]):
+    decision = data.get("Decision")
+    if not decision:
         return
 
-    for item in items:
-        st.markdown(f"• {item}")
-
-
-def render_trace(trace):
-    if not trace:
-        return
-
-    st.markdown(
-        '<div class="section-title">Verification Trace</div>',
-        unsafe_allow_html=True,
-    )
-
-    for step in trace:
-        st.markdown(
-            f"""
-            <div class="trace-step">
-                ✓ {step}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-def render_decision(data):
-    """
-    Render only information supplied by the backend.
-    Layout: Decision → Agent Activity → Evidence & Sources → Verified Data
-    """
-
-    if not data:
-        return
-
-    if data.get("Text"):
-        st.error(data["Text"])
-        return
-
-    # --------------------------------------------------------
-    # UNAUTHORIZED (SECURITY BOUNDARY)
-    # --------------------------------------------------------
-    if data.get("Error") == "UNAUTHORIZED":
-        requested = data.get('Requested', 'UNKNOWN')
-        session_scope = data.get('Scope', 'NONE')
-        st.markdown(
-            f"""
-            <div style="border: 2px solid #f04438; border-radius: 8px; padding: 1.5rem; background-color: #fff5f4; margin-bottom: 1rem;">
-                <h3 style="color: #d92d20; margin-top: 0;">🔐 ACCESS DENIED</h3>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                    <div>
-                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Requested</div>
-                        <div style="font-size: 1rem; font-weight: 600;">{requested}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Your scope</div>
-                        <div style="font-size: 1rem; font-weight: 600;">{session_scope}</div>
-                    </div>
-                </div>
-
-                <hr style="border-top: 1px solid #fecdca;">
-
-                <p style="margin-bottom: 0.3rem;"><strong>Rule engine</strong> — <span style="color: #d92d20;">NOT INVOKED</span></p>
-                <p style="margin-bottom: 0.3rem;"><strong>Data returned</strong> — <span style="color: #d92d20;">NONE</span></p>
-                <p style="margin-bottom: 0;"><strong>Action created</strong> — <span style="color: #d92d20;">NONE</span></p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        # Show the tool trace even for denials (demonstrates early termination)
-        tool_trace = data.get("tool_trace", [])
-        if tool_trace:
-            st.markdown("### Agent Activity")
-            st.markdown("<div style='border-left: 3px solid #f04438; padding-left: 1rem;'>", unsafe_allow_html=True)
-            for step in tool_trace:
-                tool_name = step.get('tool', '')
-                tool_in = step.get('input', {})
-                in_str = ", ".join(f"{k}={v}" for k, v in tool_in.items())
-                st.markdown(f"<div style='margin-bottom: 0.5rem;'><strong style='color: #d92d20;'>✕ {tool_name}</strong> (blocked)<br><span style='color: #667085; font-size: 0.9rem;'>Input: {in_str}</span></div>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    decision = data.get("Decision", "UNKNOWN")
-
-    # --------------------------------------------------------
-    # 1. DECISION BOX (top — always first)
-    # --------------------------------------------------------
-    if decision == "UNKNOWN":
-        lim_html = "".join([f"<li>{l}</li>" for l in data.get('Limitations', [])])
-        st.markdown(
-            f"""
-            <div style="border: 2px solid #f79009; border-radius: 8px; padding: 1.5rem; background-color: #fffaeb; margin-bottom: 1rem;">
-                <p style="color: #b54708; font-size: 0.8rem; font-weight: bold; margin-bottom: 0; text-transform: uppercase;">Decision</p>
-                <h2 style="color: #b54708; margin-top: 0;">⚠ UNKNOWN</h2>
-
-                <p>The system cannot safely determine eligibility. No assumption was made.</p>
-
-                <h4 style="color: #b54708; margin-bottom: 0;">Missing evidence / Policy constraints</h4>
-                <hr style="border-top: 1px solid #fedf89; margin-top: 0.3rem;">
-                <ul style="margin-top: 0;">
-                    {lim_html}
-                </ul>
-
-                <h4 style="color: #b54708; margin-bottom: 0;">Outcome</h4>
-                <hr style="border-top: 1px solid #fedf89; margin-top: 0.3rem;">
-                <p style="margin-bottom: 0;"><strong>Human investigation required.</strong><br>
-                No state change authorized. No action prepared.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    if decision in ["CANCELLATION_ALLOWED", "ELIGIBLE", "NOT_BREACHED"]:
+        st.success(f"### Decision: {decision}")
+    elif decision in ["UNKNOWN", "BUSINESS_TIME_CALCULATION_UNSPECIFIED"]:
+        st.warning(f"### Decision: ⚠️ {decision}")
+    elif decision in ["BREACHED", "DEADLINE_ELAPSED"]:
+        st.error(f"### Decision: 🚨 {decision}")
     else:
-        border_color = "#039855" if decision in ("CANCELLATION_ALLOWED", "ELIGIBLE", "NOT_BREACHED", "NOT_DUE") else "#d92d20"
-        conflict = data.get("ConflictDetected", False)
-        conflict_html = "<br><span style='color: #b54708; font-size: 0.9rem; font-weight: 600;'>⚠ CONFLICT DETECTED in source data</span>" if conflict else ""
-        st.markdown(
-            f"""
-            <div style="border: 2px solid {border_color}; border-radius: 8px; padding: 1.5rem; background: #ffffff; margin-bottom: 1rem;">
-                <p style="color: #667085; font-size: 0.8rem; font-weight: bold; margin-bottom: 0; text-transform: uppercase;">Decision</p>
-                <h2 style="color: {border_color}; margin-top: 0;">{decision_title(decision)}</h2>
-                <p style="margin-bottom: 0;"><strong>Why</strong><br>{data.get('Reason', '')}{conflict_html}</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        st.info(f"### Decision: {decision}")
 
-    # --------------------------------------------------------
-    # 2. AGENT ACTIVITY (intent + tool trace)
-    # --------------------------------------------------------
-    tool_trace = data.get("tool_trace", [])
-    intent = data.get("Intent", "")
-    if tool_trace or intent:
-        st.markdown("### Agent Activity")
-        if intent:
-            intent_labels = {
-                "cancellation": "Order Cancellation",
-                "service_credit": "Service Credit",
-                "sla": "SLA Investigation",
-            }
-            st.markdown(
-                f"<div style='margin-bottom: 0.8rem; padding: 0.5rem 0.8rem; background: #f9fafb; border: 1px solid #eaecf0; border-radius: 4px;'>"
-                f"<span style='font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;'>Intent detected</span><br>"
-                f"<strong>{intent_labels.get(intent, intent)}</strong>"
-                f"</div>",
-                unsafe_allow_html=True
-            )
-        st.markdown("<div style='border-left: 3px solid #98a2b3; padding-left: 1rem;'>", unsafe_allow_html=True)
+    if data.get("Reason"):
+        st.markdown(f"**Explanation:** {data['Reason']}")
+
+    limitations = data.get("limitations") or data.get("Limitations") or []
+    if limitations:
+        with st.expander("⚠️ Operational Limitations / Missing Information", expanded=True):
+            for lim in limitations:
+                st.markdown(f"- {lim}")
+
+def render_tool_trace(tool_trace: list):
+    if not tool_trace:
+        return
+    with st.expander("🔍 Agent Activity & Tool Calls", expanded=False):
         for step in tool_trace:
-            tool_name = step.get('tool', '')
-            tool_in = step.get('input', {})
-            tool_out = step.get('output', '')
-            in_str = ", ".join(f"{k}={v}" for k, v in tool_in.items())
-            st.markdown(
-                f"<div style='margin-bottom: 0.8rem;'>"
-                f"<strong style='color: #039855;'>✓ {tool_name}</strong><br>"
-                f"<span style='color: #667085; font-size: 0.9rem;'>Input: {in_str}</span><br>"
-                f"<span style='color: #344054; font-size: 0.9rem;'>Result: {tool_out}</span>"
-                f"</div>",
-                unsafe_allow_html=True
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
+            tool_name = step.get("tool", "unknown_tool")
+            status = step.get("status", "SUCCESS")
+            inp = step.get("input", {})
+            out = step.get("output", {})
 
-    # --------------------------------------------------------
-    # 3. EVIDENCE & SOURCES
-    # --------------------------------------------------------
-    evidence = data.get("Evidence", [])
-    if evidence:
-        st.markdown("### Evidence & Sources")
-        for e in evidence:
-            if isinstance(e, dict):
-                source = e.get('source', '')
-                rule = e.get('rule', '')
-                raw_authority = e.get('authority', '')
-            else:
-                source = str(e)
-                rule = ""
-                raw_authority = ""
+            status_icon = "✓" if status == "SUCCESS" else "⚠️" if status == "UNAUTHORIZED" else "✗"
+            st.markdown(f"**{status_icon} `{tool_name}`** — Status: `{status}`")
+            st.json({"arguments": inp, "result_summary": out})
 
-            if raw_authority == "CUSTOMER_SPECIFIC":
-                authority_label = "Customer-specific · Higher authority"
-                badge_color = "#15803d"
-                star = "★"
-            elif raw_authority == "GENERAL_POLICY":
-                authority_label = "General policy"
-                badge_color = "#667085"
-                star = "○"
-            else:
-                authority_label = ""
-                badge_color = "#667085"
-                star = "○"
-
-            st.markdown(
-                f"<div style='padding: 0.8rem; background: #f9fafb; border: 1px solid #eaecf0; border-radius: 4px; margin-bottom: 0.5rem;'>"
-                f"<strong style='color: #15803d;'>{star} {source}</strong><br>"
-                f"<span style='font-size: 0.85rem; color: {badge_color}; text-transform: uppercase; font-weight: 600;'>{authority_label}</span><br>"
-                f"<span style='font-size: 0.9rem; color: #344054;'>{rule}</span>"
-                f"</div>",
-                unsafe_allow_html=True
-            )
-
-    # --------------------------------------------------------
-    # 4. VERIFIED DATA (context + SLA metrics — last, supporting detail)
-    # --------------------------------------------------------
-    if data.get("Context") or data.get("SLA_Details"):
-        st.markdown("### Verified Data")
-        all_fields = {}
-        if data.get("Context"):
-            all_fields.update(data["Context"])
-        if data.get("SLA_Details"):
-            all_fields.update(data["SLA_Details"])
-
-        cols = st.columns(min(max(len(all_fields), 1), 4))
-        for i, (key, value) in enumerate(all_fields.items()):
-            with cols[i % len(cols)]:
+def render_evidence_panel(evidence_list: list):
+    if not evidence_list:
+        return
+    with st.expander("📄 Evidence & Policy Citations", expanded=True):
+        for ev in evidence_list:
+            if isinstance(ev, dict):
+                src = ev.get("source", "Unknown Document")
+                rule = ev.get("rule", "Applicable Rule")
+                auth = ev.get("authority", "GENERAL_POLICY")
+                
+                badge_class = "badge-customer" if auth == "CUSTOMER_SPECIFIC" else "badge-general"
+                badge_label = "Customer Agreement (Override)" if auth == "CUSTOMER_SPECIFIC" else "General Policy SOP"
+                
                 st.markdown(
-                    f"""
-                    <div style="border: 1px solid #e4e7ec; border-radius: 8px; padding: 1rem; background: #f9fafb;">
-                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">{key}</div>
-                        <div style="font-size: 1rem; font-weight: 600;">{value}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+                    f"<span class='{badge_class}'>{badge_label}</span> **`{html.escape(src)}`** — {html.escape(rule)}",
+                    unsafe_allow_html=True
                 )
+            else:
+                st.markdown(f"- `{html.escape(str(ev))}`")
 
-    # --------------------------------------------------------
-    # ACTION PREPARATION FLAG
-    # --------------------------------------------------------
-    action = data.get("Action")
-    if action and action.get("status") == "PREPARED":
-        st.session_state.pending_action = {
-            "action_id": action["action_id"],
-            "decision": decision,
-            "role": context.role,
-            "scope": sorted(context.account_scope),
-        }
-        # The actual action control block renders below the chat history
-
-
-def submit_prompt(prompt):
-    """
-    Central query handler.
-    """
-
-    st.session_state.messages.append(
-        {
-            "role": "user",
-            "content": prompt,
-        }
-    )
-
-    try:
-
-        result = agent.process_message_structured(
-            prompt,
-            context,
-        )
-
-    except Exception:
-
-        logger.exception(
-            "Agent processing failed"
-        )
-
-        result = {
-            "Text":
-                "SYSTEM ERROR: The request could not "
-                "be completed safely."
-        }
-
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": result.get("Text", ""),
-            "decision_data": (
-                result
-                if "Decision" in result or "Error" in result
-                else None
-            ),
-        }
-    )
-
-
-# ============================================================
-# WELCOME STATE
-# ============================================================
-
-if not st.session_state.messages:
-
+def render_action_review(action: Dict[str, Any]):
+    action_id = action.get("action_id", "act_unknown")
     st.markdown(
-        """
-        <div class="hero" style="text-align: center; padding-top: 2rem;">
-            <h1 style="font-size: 3rem;">PARCELPILOT</h1>
-            <h3 style="color: #667085; font-weight: 500;">AI OPERATIONS CONTROL CENTER</h3>
-            <p style="margin-top: 1rem; font-size: 1.1rem;">
-                Trusted operational decisions with deterministic<br>
-                policy enforcement and human-gated execution.
-            </p>
+        f"""
+        <div class="action-card">
+            <h3 style="color:#B45309; margin-top:0;">⚠️ Action Requires Human Confirmation</h3>
+            <p><strong>Action ID:</strong> <code>{html.escape(action_id)}</code> | <strong>Type:</strong> <code>{html.escape(str(action.get('type', 'ESCALATION')))}</code></p>
+            <p><strong>Ticket ID:</strong> <code>{html.escape(str(action.get('ticket_id', 'N/A')))}</code> | <strong>Proposed Priority:</strong> <code>{html.escape(str(action.get('priority', 'P1')))}</code></p>
+            <p><strong>Reason:</strong> {html.escape(str(action.get('reason', 'N/A')))}</p>
         </div>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
+
+    col1, col2 = st.columns([1, 4])
     with col1:
-        st.markdown(
-            f"""
-            <div style="text-align: right; padding-right: 2rem; border-right: 1px solid #eaecf0;">
-                <h2 style="color: #039855; margin-bottom: 0;">{_test_count}</h2>
-                <p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Tests Passing</p>
-            </div>
-            """, unsafe_allow_html=True
-        )
-    with col2:
-        st.markdown(
-            """
-            <div style="text-align: left; padding-left: 2rem;">
-                <h2 style="color: #039855; margin-bottom: 0;">0</h2>
-                <p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Regressions</p>
-            </div>
-            """, unsafe_allow_html=True
-        )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown(
-        """
-        <div style="display: flex; justify-content: center; margin-bottom: 2rem;">
-            <div style="background: #f9fafb; border: 1px solid #eaecf0; border-radius: 12px; padding: 1.5rem; width: 600px; text-align: left;">
-                <h4 style="margin-top: 0; color: #344054; text-align: center; text-transform: uppercase;">What this system proves</h4>
-                <hr style="border-top: 1px solid #eaecf0;">
-                
-                <p style="margin-bottom: 0.8rem;"><strong>🔐 Authorization</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Only authorized data is retrieved.</span></p>
-
-                <p style="margin-bottom: 0.8rem;"><strong>📚 Evidence</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Decisions cite the actual source documents.</span></p>
-
-                <p style="margin-bottom: 0.8rem;"><strong>⚙ Deterministic rules</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Business decisions are not delegated to the LLM.</span></p>
-
-                <p style="margin-bottom: 0.8rem;"><strong>⚠ Uncertainty</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Missing/conflicting evidence produces UNKNOWN.</span></p>
-
-                <p style="margin-bottom: 0.8rem;"><strong>👤 Human control</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">State-changing actions require approval.</span></p>
-
-                <p style="margin-bottom: 0;"><strong>🔄 Revalidation</strong><br>
-                <span style="color: #667085; font-size: 0.95rem;">Authorization and rules are checked again before execution.</span></p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    
-    st.divider()
-
-    st.markdown("<h3 style='text-align: center; color: #344054; margin-bottom: 1.5rem;'>WHAT DO YOU WANT TO INVESTIGATE?</h3>", unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        if st.button(
-            "📦 Order Cancellation",
-            use_container_width=True,
-        ):
-
-            submit_prompt(
-                "Can I cancel ORD-1001?"
-            )
-
-            st.rerun()
-
-    with col2:
-
-        if st.button(
-            "💳 Service Credit",
-            use_container_width=True,
-        ):
-
-            submit_prompt(
-                "Is ORD-2001 eligible for a service credit?"
-            )
-
-            st.rerun()
-
-    with col3:
-
-        if st.button(
-            "⏱ SLA Investigation",
-            use_container_width=True,
-        ):
-
-            submit_prompt(
-                "What is the SLA for TKT-999?"
-            )
-
-            st.rerun()
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown("### Example Queries")
-
-    examples = [
-        "Can I cancel ORD-1001?",
-        "Is ORD-2001 eligible for a service credit?",
-        "What is the SLA for TKT-999?",
-        "Can I access Northstar's ORD-1001?",
-    ]
-
-    for example in examples:
-
-        st.markdown(
-            f"""
-            <div class="example-box">
-                {example}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-# ============================================================
-# CHAT HISTORY
-# ============================================================
-
-for message in st.session_state.messages:
-
-    with st.chat_message(
-        message["role"]
-    ):
-
-        if message["content"]:
-            st.markdown(
-                message["content"]
-            )
-
-        if message.get("decision_data"):
-            render_decision(
-                message["decision_data"]
-            )
-
-
-# ============================================================
-# PENDING ACTION
-# ============================================================
-
-pending = st.session_state.pending_action
-
-if pending:
-
-    action_id = pending["action_id"]
-
-    try:
-        pending_payload = (
-            gateway.get_pending_action(
-                action_id
-            )
-        )
-    except AttributeError:
-        pending_payload = None
-
-    if pending_payload:
-
-        payload = pending_payload.get(
-            "payload",
-            {},
-        )
-
-        st.markdown(
-            """
-            <div style="border: 2px solid #000; border-radius: 8px; padding: 1.5rem; background-color: #ffffff; margin-top: 2rem;">
-                <h3 style="text-align: center; margin-top: 0; text-transform: uppercase;">ACTION REVIEW</h3>
-                
-                <div style="background-color: #fff5f4; color: #d92d20; padding: 0.5rem; border-radius: 4px; font-weight: bold; margin-bottom: 1rem; border: 1px solid #fecdca;">
-                    ⚠ ESCALATION REQUIRES HUMAN APPROVAL
-                </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        st.markdown(
-            f"""
-            <div style="margin-bottom: 1rem;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.8rem; margin-bottom: 1rem;">
-                    <div>
-                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Action Type</div>
-                        <code style="font-size: 0.95rem;">{payload.get('action', 'ESCALATE_TICKET')}</code>
-                    </div>
-                    <div>
-                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Target</div>
-                        <div style="font-weight: 600;">{payload.get('ticket_id', 'UNKNOWN')}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Priority</div>
-                        <div style="font-weight: 600; color: #d92d20;">{payload.get('priority', 'P1')}</div>
-                    </div>
-                </div>
-                <div style="border: 1px solid #e4e7ec; border-radius: 6px; padding: 1rem; background-color: #f9fafb; margin-bottom: 0.8rem;">
-                    <strong>Reason for action</strong><br>
-                    {payload.get('reason', 'Not provided')}
-                </div>
-                <div style="border: 1px solid #e4e7ec; border-radius: 6px; padding: 0.6rem 1rem; background-color: #f9fafb;">
-                    <span style="font-size: 0.8rem; color: #667085; font-weight: bold; text-transform: uppercase;">Action ID</span><br>
-                    <code>{action_id}</code> &nbsp;
-                    <span style="background: #fef3c7; color: #b45309; font-size: 0.8rem; font-weight: bold; padding: 0.15rem 0.4rem; border-radius: 3px; text-transform: uppercase;">PREPARED</span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        st.markdown("<div style='margin-top: 1.5rem;'>", unsafe_allow_html=True)
-        reject_col, approve_col = st.columns(2)
-
-        with reject_col:
-
-            if st.button(
-                "REJECT",
-                type="secondary",
-                use_container_width=True,
-            ):
-
+        if st.button("✅ Approve & Execute", key=f"app_{action_id}", type="primary", use_container_width=True):
+            with st.spinner("Revalidating and executing action..."):
                 try:
-                    gateway.reject(
-                        action_id
-                    )
-                except Exception:
-                    logger.exception(
-                        "Action rejection failed"
-                    )
-
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content":
-                            f"Action {action_id} rejected. "
-                            "No state change was executed.",
-                    }
-                )
-
-                st.session_state.pending_action = None
-                st.rerun()
-
-        with approve_col:
-
-            if st.button(
-                "APPROVE & EXECUTE",
-                type="primary",
-                use_container_width=True,
-            ):
-
-                try:
-                    result = gateway.approve(action_id, context)
-                    
-                    if result.get("status") == "EXECUTED":
-                        rev = result.get("revalidation", {})
-                        
-                        def _check(v):
-                            return "✓" if v == "PASSED" else "✕"
-                        
-                        content = f"""**⟳ REVALIDATING**
-
-{_check(rev.get('authorization', 'PENDING'))} Authorization — `{rev.get('authorization', 'PENDING')}`
-{_check(rev.get('record_access', 'PENDING'))} Record access — `{rev.get('record_access', 'PENDING')}`
-{_check(rev.get('rule_state', 'PENDING'))} SLA rule state — `{rev.get('rule_state', 'PENDING')}`
-{_check(rev.get('payload_integrity', 'PENDING'))} Payload integrity — `{rev.get('payload_integrity', 'PENDING')}`
-
-**EXECUTING...**
-
-✓ **ACTION EXECUTED**
-
-Action ID: `{action_id}`"""
+                    res = agent_service.approve_action(action_id, context)
+                    if res.get("status") == "EXECUTED":
+                        st.success(f"Action `{action_id}` executed successfully!")
+                        st.json(res.get("revalidation", {}))
                     else:
-                        rev = result.get("revalidation", {})
-                        content = f"""**⟳ REVALIDATING**
-
-✕ **REVALIDATION FAILED**
-
-{result.get('error', 'Unknown error')}
-Action ID: `{action_id}`"""
+                        st.error(f"Execution rejected by ActionGateway: {res.get('error', 'Revalidation failed')}")
                 except Exception as e:
-                    logger.exception("Action approval failed")
-                    content = f"SYSTEM ERROR: {str(e)}"
-
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": content,
-                    }
-                )
-
+                    logger.exception("Action approval error")
+                    st.error("System Error: Action could not be executed safely.")
                 st.session_state.pending_action = None
                 st.rerun()
 
-        st.markdown(
-            """
-                </div>
-                <div style="color: #667085; font-size: 0.9rem; text-align: center; margin-top: 1rem; border-top: 1px solid #eaecf0; padding-top: 1rem;">
-                    Approval does NOT directly execute.<br>
-                    Backend revalidates authorization + SLA before execution.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    with col2:
+        if st.button("❌ Reject Action", key=f"rej_{action_id}", use_container_width=True):
+            agent_service.reject_action(action_id)
+            st.info(f"Action `{action_id}` was rejected. No mutation occurred.")
+            st.session_state.pending_action = None
+            st.rerun()
 
-# ============================================================
-# CHAT INPUT
-# ============================================================
+# ------------------------------------------------------------
+# Main Chat & Demonstration Stream
+# ------------------------------------------------------------
+for msg in st.session_state.chat_history:
+    with st.chat_message(msg["role"]):
+        if msg["role"] == "user":
+            st.markdown(msg["content"])
+        else:
+            structured = msg.get("structured", {})
+            if "Error" in structured and structured["Error"] == "UNAUTHORIZED":
+                st.error("### 🛑 Access Denied")
+                st.markdown(f"**Tenant Isolation Enforced:** The active context (`{structured.get('Scope', 'SCOPED')}`) is not authorized to access record `{structured.get('Requested', 'N/A')}`.")
+                st.caption("✓ No operational data exposed · ✓ No documents retrieved · ✓ No business rules evaluated")
+            elif "Decision" in structured:
+                render_decision_card(structured)
+                render_evidence_panel(structured.get("Evidence") or [])
+                render_tool_trace(structured.get("tool_trace") or [])
+            elif msg.get("content"):
+                st.markdown(msg["content"])
 
-prompt = st.chat_input(
-    "Ask a support question..."
-)
+# Render any active pending action requiring human review
+if st.session_state.pending_action:
+    render_action_review(st.session_state.pending_action)
 
-if prompt:
+# Sample prompt suggestions
+st.markdown("##### 💡 Suggested Demo Queries")
+c1, c2, c3, c4 = st.columns(4)
+demo_query = None
+if c1.button("ORD-1001 Cancellation", use_container_width=True):
+    demo_query = "Can Northstar cancel ORD-1001 without a cancellation fee?"
+if c2.button("ORD-2001 Service Credit", use_container_width=True):
+    demo_query = "Is ORD-2001 eligible for a service credit?"
+if c3.button("TKT-501 SLA Breach", use_container_width=True):
+    demo_query = "What is the SLA status for TKT-501?"
+if c4.button("Cross-Account Security", use_container_width=True):
+    demo_query = "Can LumenWorks cancel Northstar's order ORD-1001?"
 
-    submit_prompt(prompt)
-    st.rerun()
+prompt_input = st.chat_input("Ask a question regarding orders, service credits, or SLA escalations...")
+final_prompt = demo_query or prompt_input
+
+if final_prompt:
+    st.session_state.chat_history.append({"role": "user", "content": final_prompt})
+    with st.chat_message("user"):
+        st.markdown(final_prompt)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Agent evaluating request..."):
+            try:
+                structured_response = agent_service.process_message_structured(final_prompt, context)
+            except PermissionError:
+                structured_response = {
+                    "Error": "UNAUTHORIZED",
+                    "Requested": "TARGET_RESOURCE",
+                    "Scope": list(context.account_scope)[0] if context.account_scope else "NONE",
+                    "Reason": "The operational data layer rejected the request."
+                }
+            except Exception as e:
+                logger.exception("Error processing agent turn")
+                structured_response = {"Text": "An internal system error occurred while processing your request."}
+
+            if "Action" in structured_response and structured_response["Action"]:
+                st.session_state.pending_action = structured_response["Action"]
+
+            if "Error" in structured_response and structured_response["Error"] == "UNAUTHORIZED":
+                st.error("### 🛑 Access Denied")
+                st.markdown(f"**Tenant Isolation Enforced:** The active context (`{structured_response.get('Scope', 'SCOPED')}`) is not authorized to access record `{structured_response.get('Requested', 'N/A')}`.")
+            elif "Decision" in structured_response:
+                render_decision_card(structured_response)
+                render_evidence_panel(structured_response.get("Evidence") or [])
+                render_tool_trace(structured_response.get("tool_trace") or [])
+            elif structured_response.get("Text"):
+                st.markdown(structured_response["Text"])
+
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": structured_response.get("Text", ""),
+                "structured": structured_response
+            })
+            
+    if st.session_state.pending_action:
+        st.rerun()

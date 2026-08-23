@@ -1,7 +1,8 @@
-﻿import json
+import json
 import logging
 import re
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 from src.security.authorization import SecurityContext
 from src.data.operational_store import OperationalDataStore
 from src.data.document_store import DocumentStore
@@ -287,23 +288,22 @@ class AgentService:
             logger.info("Executing via DeterministicToolEngine (Offline Mode)")
             return self.offline_engine.execute_turn(message, context)
 
-    def process_message(self, message: str, context: SecurityContext) -> str:
-        res = self.process_message_structured(message, context)
-        if "Text" in res and len(res) == 1:
-            return res["Text"]
-        if "Error" in res:
-            return f"{res['Error']}: You do not have permission to access this record."
+    def get_snapshot_time(self) -> datetime:
+        return self.dispatcher.data_store.get_snapshot_time()
 
-        lines = []
-        if "Decision" in res: lines.append(f"Decision: {res['Decision']}")
-        if "Reason" in res: lines.append(f"Reason: {res['Reason']}")
-        if res.get("Evidence"): lines.append(f"Evidence: {', '.join([e['source'] if isinstance(e, dict) else str(e) for e in res['Evidence']])}")
-        else: lines.append("Evidence: ")
+    def approve_action(self, action_id: str, context: SecurityContext) -> Dict[str, Any]:
+        return self.dispatcher.action_gateway.approve(action_id, context)
 
-        if res.get("Limitations"):
-            lines.append(f"Limitations: {' | '.join(res['Limitations'])}")
+    def reject_action(self, action_id: str) -> Dict[str, Any]:
+        return self.dispatcher.action_gateway.reject(action_id)
 
-        if res.get("Action"):
-            lines.append(f"Action: PREPARED. Awaiting human confirmation for Action ID: {res['Action']['action_id']}")
+_service_instance = None
 
-        return "\n".join(lines)
+def get_agent_service() -> AgentService:
+    global _service_instance
+    if _service_instance is None:
+        data_store = OperationalDataStore()
+        doc_store = DocumentStore()
+        action_gateway = ActionGateway(data_store, doc_store)
+        _service_instance = AgentService(data_store, doc_store, action_gateway)
+    return _service_instance
