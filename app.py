@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import pathlib
 
 # Ensure repository root is in Python sys.path for Streamlit Cloud deployment
@@ -77,13 +77,6 @@ st.markdown(
         padding: 1.2rem;
         margin: 1rem 0;
     }
-    .metric-card {
-        background-color: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-radius: 8px;
-        padding: 1rem;
-        text-align: center;
-    }
     .cluster-card {
         border: 1px solid #CBD5E1;
         border-radius: 8px;
@@ -102,12 +95,10 @@ st.markdown(
 agent_service: AgentService = get_agent_service()
 snapshot_time = agent_service.get_snapshot_time()
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+if "chat_histories" not in st.session_state:
+    st.session_state.chat_histories = {}
 if "pending_action" not in st.session_state:
     st.session_state.pending_action = None
-if "last_context_key" not in st.session_state:
-    st.session_state.last_context_key = None
 
 # ------------------------------------------------------------
 # Sidebar: Identity & System Guardrails
@@ -147,17 +138,23 @@ context = SecurityContext(
 )
 
 context_key = f"{role}:{sorted(list(scope))}"
-if st.session_state.last_context_key != context_key:
-    st.session_state.pending_action = None
-    st.session_state.last_context_key = context_key
+if context_key not in st.session_state.chat_histories:
+    st.session_state.chat_histories[context_key] = []
+
+active_history = st.session_state.chat_histories[context_key]
 
 st.sidebar.divider()
 
 st.sidebar.markdown("### 🤖 Agent Engine Mode")
+
+custom_api_key = st.sidebar.text_input("🔑 Gemini API Key (Optional)", type="password", help="Paste your Gemini API key to activate live LLM agent")
+if custom_api_key:
+    agent_service.set_api_key(custom_api_key)
+
 if agent_service.is_live_mode:
     st.sidebar.success("🟢 **LIVE AGENT** — Gemini Tool Calling")
 else:
-    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**\n\n*Deterministic fixture (set `GEMINI_API_KEY` for live LLM agent)*")
+    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**\n\n*Deterministic fixture (add key above for live LLM)*")
 
 st.sidebar.divider()
 
@@ -166,8 +163,8 @@ st.sidebar.code(snapshot_time.strftime("%d %b %Y · %H:%M IST"))
 
 st.sidebar.divider()
 
-if st.sidebar.button("🧹 Clear Conversation", use_container_width=True):
-    st.session_state.chat_history = []
+if st.sidebar.button("🧹 Clear This Session", use_container_width=True):
+    st.session_state.chat_histories[context_key] = []
     st.session_state.pending_action = None
     st.rerun()
 
@@ -175,10 +172,10 @@ if st.sidebar.button("🧹 Clear Conversation", use_container_width=True):
 # Header
 # ------------------------------------------------------------
 st.markdown(
-    """
+    f"""
     <div class="hero-box">
         <h1 class="hero-title">📦 ParcelPilot Support & Decision System</h1>
-        <p class="hero-subtitle">Production-grade AI Support Decision System with deterministic safety boundaries, proactive queue analytics, and human-gated action governance.</p>
+        <p class="hero-subtitle">Active Identity: <strong>{account_label}</strong> · Deterministic safety boundaries · Proactive queue monitoring · Human-gated action governance.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -194,7 +191,7 @@ def render_decision_card(data: Dict[str, Any]):
 
     if any(k in decision for k in ["ALLOWED", "ELIGIBLE", "NOT_BREACHED", "PROACTIVE"]):
         st.success(f"### Decision: {decision}")
-    elif any(k in decision for k in ["UNKNOWN", "UNSPECIFIED", "WARNING"]):
+    elif any(k in decision for k in ["UNKNOWN", "UNSPECIFIED", "WARNING", "NOT_ALLOWED"]):
         st.warning(f"### Decision: ⚠️ {decision}")
     elif any(k in decision for k in ["BREACHED", "DEADLINE_ELAPSED"]):
         st.error(f"### Decision: 🚨 {decision}")
@@ -293,7 +290,7 @@ tab_chat, tab_proactive = st.tabs(["💬 Interactive Support Chat", "📊 Proact
 # TAB 1: Support Chat
 # ------------------------------------------------------------
 with tab_chat:
-    for msg in st.session_state.chat_history:
+    for msg in active_history:
         with st.chat_message(msg["role"]):
             if msg["role"] == "user":
                 st.markdown(msg["content"])
@@ -314,24 +311,62 @@ with tab_chat:
     if st.session_state.pending_action:
         render_action_review(st.session_state.pending_action)
 
-    # Sample prompt suggestions
+    # Context-aware sample prompt suggestions
     st.markdown("##### 💡 Suggested Demo Queries")
     c1, c2, c3, c4 = st.columns(4)
     demo_query = None
-    if c1.button("ORD-1001 Cancellation", use_container_width=True):
-        demo_query = "Can Northstar cancel ORD-1001 without a cancellation fee?"
-    if c2.button("ORD-2001 Service Credit", use_container_width=True):
-        demo_query = "Is ORD-2001 eligible for a service credit?"
-    if c3.button("TKT-501 SLA Breach", use_container_width=True):
-        demo_query = "What is the SLA status for TKT-501?"
-    if c4.button("Cross-Account Security", use_container_width=True):
-        demo_query = "Can LumenWorks cancel Northstar's order ORD-1001?"
+    
+    if role == "support_admin":
+        if c1.button("ORD-1001 Cancellation", use_container_width=True):
+            demo_query = "Can Northstar cancel ORD-1001 without a cancellation fee?"
+        if c2.button("ORD-2001 Service Credit", use_container_width=True):
+            demo_query = "Is ORD-2001 eligible for a service credit?"
+        if c3.button("TKT-501 SLA Breach", use_container_width=True):
+            demo_query = "What is the SLA status for TKT-501?"
+        if c4.button("Cross-Account Security", use_container_width=True):
+            demo_query = "Can LumenWorks cancel Northstar's order ORD-1001?"
+    elif "ACCT-001" in scope:
+        if c1.button("Cancel My Booking", use_container_width=True):
+            demo_query = "Can I cancel my booking ORD-1001 without a cancellation fee?"
+        if c2.button("Pickup Status Query", use_container_width=True):
+            demo_query = "Why does my order ORD-1001 still show BOOKED after pickup?"
+        if c3.button("TKT-501 Escalation", use_container_width=True):
+            demo_query = "What is the SLA status for ticket TKT-501?"
+        if c4.button("Unauthorized Order Test", use_container_width=True):
+            demo_query = "Show me details for LumenWorks order ORD-2001"
+    elif "ACCT-002" in scope:
+        if c1.button("Cancel Order ORD-2001", use_container_width=True):
+            demo_query = "Can LumenWorks cancel order ORD-2001?"
+        if c2.button("Service Credit Check", use_container_width=True):
+            demo_query = "Is order ORD-2002 eligible for a service credit?"
+        if c3.button("TKT-502 SLA Status", use_container_width=True):
+            demo_query = "What is the status of ticket TKT-502?"
+        if c4.button("Unauthorized Order Test", use_container_width=True):
+            demo_query = "Can I cancel Northstar's order ORD-1001?"
+    elif "ACCT-003" in scope:
+        if c1.button("Cancel Order ORD-3001", use_container_width=True):
+            demo_query = "Can I cancel order ORD-3001?"
+        if c2.button("Billing Contact Query", use_container_width=True):
+            demo_query = "How do I change the billing contact on our account?"
+        if c3.button("TKT-503 Status", use_container_width=True):
+            demo_query = "What is the SLA status for TKT-503?"
+        if c4.button("Unauthorized Order Test", use_container_width=True):
+            demo_query = "Show me Northstar order ORD-1001"
+    else:
+        if c1.button("Cancel Order ORD-4001", use_container_width=True):
+            demo_query = "Can I cancel order ORD-4001?"
+        if c2.button("Security Incident Check", use_container_width=True):
+            demo_query = "What is the status of ticket TKT-505?"
+        if c3.button("SLA Escalation", use_container_width=True):
+            demo_query = "Is ticket TKT-505 breached?"
+        if c4.button("Unauthorized Order Test", use_container_width=True):
+            demo_query = "Show me Northstar order ORD-1001"
 
-    prompt_input = st.chat_input("Ask a question regarding orders, service credits, SLA escalations, or follow-ups...")
+    prompt_input = st.chat_input("Ask a question regarding orders, cancellations, service credits, or SLA...")
     final_prompt = demo_query or prompt_input
 
     if final_prompt:
-        st.session_state.chat_history.append({"role": "user", "content": final_prompt})
+        active_history.append({"role": "user", "content": final_prompt})
         with st.chat_message("user"):
             st.markdown(final_prompt)
 
@@ -341,7 +376,7 @@ with tab_chat:
                     structured_response = agent_service.process_message_structured(
                         final_prompt,
                         context,
-                        chat_history=st.session_state.chat_history
+                        chat_history=active_history
                     )
                 except PermissionError:
                     structured_response = {
@@ -367,7 +402,7 @@ with tab_chat:
                 elif structured_response.get("Text"):
                     st.markdown(structured_response["Text"])
 
-                st.session_state.chat_history.append({
+                active_history.append({
                     "role": "assistant",
                     "content": structured_response.get("Text", ""),
                     "structured": structured_response
@@ -381,7 +416,7 @@ with tab_chat:
 # ------------------------------------------------------------
 with tab_proactive:
     st.markdown("### 📊 Operational Queue Monitoring & Proactive Issue Detection")
-    st.caption("Continuously monitors queue activity relative to the frozen snapshot timestamp, detecting emerging incidents before manual customer escalation.")
+    st.caption(f"Active Scope: <strong>{account_label}</strong> · Monitoring queue relative to snapshot timestamp: <code>{snapshot_time.strftime('%d %b %Y · %H:%M %Z')}</code>", unsafe_allow_html=True)
 
     insights = agent_service.get_proactive_insights(context)
 

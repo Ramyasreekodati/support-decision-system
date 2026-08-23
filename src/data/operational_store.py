@@ -1,7 +1,7 @@
 ﻿import pathlib
 import pandas as pd
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from src.security.authorization import SecurityContext, is_authorized, IST
 
 class OperationalDataStore:
@@ -43,6 +43,12 @@ class OperationalDataStore:
             raise PermissionError(f"Unauthorized access to order {order_id} for scope {context.account_scope}")
         return rec
 
+    def query_orders_by_account(self, context: SecurityContext, account_id: str) -> List[Dict[str, Any]]:
+        if self.orders.empty or not is_authorized(context, account_id):
+            return []
+        match = self.orders[self.orders['account_id'] == account_id]
+        return [row.to_dict() for _, row in match.iterrows()]
+
     def query_tickets(self, context: SecurityContext, ticket_id: str) -> Optional[Dict[str, Any]]:
         if self.tickets.empty:
             return None
@@ -53,3 +59,9 @@ class OperationalDataStore:
         if not is_authorized(context, rec.get('account_id')):
             raise PermissionError(f"Unauthorized access to ticket {ticket_id} for scope {context.account_scope}")
         return rec
+
+    def query_tickets_by_account(self, context: SecurityContext, account_id: str) -> List[Dict[str, Any]]:
+        if self.tickets.empty or not is_authorized(context, account_id):
+            return []
+        match = self.tickets[self.tickets['account_id'] == account_id]
+        return [row.to_dict() for _, row in match.iterrows()]

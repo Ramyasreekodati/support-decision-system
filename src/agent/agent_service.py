@@ -172,6 +172,37 @@ class DeterministicToolEngine:
     def __init__(self, dispatcher: ToolDispatcher):
         self.dispatcher = dispatcher
 
+    def _resolve_account_order(self, context: SecurityContext, explicit_id: Optional[str]) -> Optional[str]:
+        if explicit_id:
+            return explicit_id
+        # Map active account to its primary order
+        scope_list = list(context.account_scope)
+        if scope_list and scope_list[0] != "ALL":
+            acc_id = scope_list[0]
+            account_orders = {
+                "ACCT-001": "ORD-1001",
+                "ACCT-002": "ORD-2001",
+                "ACCT-003": "ORD-3001",
+                "ACCT-004": "ORD-4001"
+            }
+            return account_orders.get(acc_id, "ORD-1001")
+        return "ORD-1001"
+
+    def _resolve_account_ticket(self, context: SecurityContext, explicit_id: Optional[str]) -> Optional[str]:
+        if explicit_id:
+            return explicit_id
+        scope_list = list(context.account_scope)
+        if scope_list and scope_list[0] != "ALL":
+            acc_id = scope_list[0]
+            account_tickets = {
+                "ACCT-001": "TKT-501",
+                "ACCT-002": "TKT-502",
+                "ACCT-003": "TKT-503",
+                "ACCT-004": "TKT-505"
+            }
+            return account_tickets.get(acc_id, "TKT-501")
+        return "TKT-501"
+
     def execute_turn(self, prompt: str, context: SecurityContext, chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         self.dispatcher.collected_state = {}
         user_lower = prompt.lower()
@@ -203,24 +234,33 @@ class DeterministicToolEngine:
                 return self._build_deterministic_response(tool_trace, context, intent="proactive_insights", entity_id="GLOBAL_QUEUE")
 
             elif ("cancel" in user_lower or (order_id and "credit" not in user_lower and "delay" not in user_lower and "sla" not in user_lower and not ticket_id)):
-                target_ord = order_id or "ORD-1001"
+                target_ord = self._resolve_account_order(context, order_id)
                 self._run_tool("get_order", {"order_id": target_ord}, context, tool_trace)
                 self._run_tool("search_documents", {"query": "cancellation policy"}, context, tool_trace)
                 self._run_tool("evaluate_cancellation", {"order_id": target_ord}, context, tool_trace)
                 return self._build_deterministic_response(tool_trace, context, intent="cancellation", entity_id=target_ord)
 
-            elif ("credit" in user_lower or "delay" in user_lower or "late" in user_lower or "refund" in user_lower) and order_id:
-                self._run_tool("get_order", {"order_id": order_id}, context, tool_trace)
+            elif ("credit" in user_lower or "delay" in user_lower or "late" in user_lower or "refund" in user_lower):
+                target_ord = self._resolve_account_order(context, order_id)
+                self._run_tool("get_order", {"order_id": target_ord}, context, tool_trace)
                 self._run_tool("search_documents", {"query": "service credit SOP"}, context, tool_trace)
-                self._run_tool("evaluate_service_credit", {"order_id": order_id}, context, tool_trace)
-                return self._build_deterministic_response(tool_trace, context, intent="service_credit", entity_id=order_id)
+                self._run_tool("evaluate_service_credit", {"order_id": target_ord}, context, tool_trace)
+                return self._build_deterministic_response(tool_trace, context, intent="service_credit", entity_id=target_ord)
 
-            elif ("sla" in user_lower or "p1" in user_lower or "escalat" in user_lower or "breach" in user_lower or "response" in user_lower) and (ticket_id or "tkt" in user_lower):
-                target_tkt = ticket_id or "TKT-501"
+            elif ("sla" in user_lower or "p1" in user_lower or "escalat" in user_lower or "breach" in user_lower or "response" in user_lower or "deadline" in user_lower):
+                target_tkt = self._resolve_account_ticket(context, ticket_id)
                 self._run_tool("get_ticket", {"ticket_id": target_tkt}, context, tool_trace)
                 self._run_tool("search_documents", {"query": "SLA policy"}, context, tool_trace)
                 self._run_tool("evaluate_sla", {"ticket_id": target_tkt}, context, tool_trace)
                 return self._build_deterministic_response(tool_trace, context, intent="sla", entity_id=target_tkt)
+
+            elif "billing" in user_lower or "contact" in user_lower:
+                self._run_tool("search_documents", {"query": "billing contact"}, context, tool_trace)
+                return {
+                    "Text": "To update your billing contact email, please submit an account update request to support@parcelpilot.com or contact your assigned CSM.",
+                    "tool_trace": tool_trace,
+                    "Mode": "OFFLINE_DETERMINISTIC_TEST_ENGINE"
+                }
 
             elif order_id:
                 self._run_tool("get_order", {"order_id": order_id}, context, tool_trace)
@@ -229,10 +269,13 @@ class DeterministicToolEngine:
                 return self._build_deterministic_response(tool_trace, context, intent="cancellation", entity_id=order_id)
 
             else:
-                return {"Text": "I'm ParcelPilot Support Agent. I can assist with order cancellations, service credits, SLA escalations, and proactive queue analytics.", "Mode": "OFFLINE_DETERMINISTIC_TEST_ENGINE"}
+                return {
+                    "Text": "I'm the ParcelPilot Support Agent. I can assist with order cancellations (e.g. ORD-1001, ORD-2001), service credit eligibility, SLA tracking (e.g. TKT-501), and proactive queue analytics.",
+                    "Mode": "OFFLINE_DETERMINISTIC_TEST_ENGINE"
+                }
 
         except PermissionError:
-            entity_id = order_id or ticket_id or "UNKNOWN"
+            entity_id = order_id or ticket_id or "UNAUTHORIZED_RESOURCE"
             return {
                 "Error": "UNAUTHORIZED",
                 "Requested": entity_id,
@@ -259,7 +302,7 @@ class DeterministicToolEngine:
             res = state["decision_result"]
             explanation["Decision"] = res.decision
             fee_str = f"₹{res.amount}" if res.amount is not None else "₹0"
-            explanation["Reason"] = f"Fee: {fee_str} · Rule: {res.applicable_rule}"
+            explanation["Reason"] = f"Order: {entity_id} · Fee: {fee_str} · Rule: {res.applicable_rule}"
             explanation["Evidence"] = res.evidence
             explanation["Limitations"] = res.limitations
             explanation["ConflictDetected"] = False
@@ -267,7 +310,7 @@ class DeterministicToolEngine:
         elif "service_credit_result" in state:
             res = state["service_credit_result"]
             explanation["Decision"] = res.eligibility
-            explanation["Reason"] = f"Credit amount: {res.credit_amount} · Rule: {res.applicable_rule}"
+            explanation["Reason"] = f"Order: {entity_id} · Credit amount: {res.credit_amount} · Rule: {res.applicable_rule}"
             explanation["Evidence"] = res.evidence
             explanation["Limitations"] = res.limitations
             explanation["ConflictDetected"] = getattr(res, "conflict_detected", False)
@@ -275,7 +318,7 @@ class DeterministicToolEngine:
         elif "sla_result" in state:
             res = state["sla_result"]
             explanation["Decision"] = res.state
-            explanation["Reason"] = f"Actual response: {res.actual_response_time or 'N/A'} min · Deadline: {res.deadline} · Escalation: {res.escalation_requirement}"
+            explanation["Reason"] = f"Ticket: {entity_id} · Actual response: {res.actual_response_time or 'N/A'} min · Deadline: {res.deadline} · Escalation: {res.escalation_requirement}"
             explanation["Evidence"] = res.evidence
             explanation["Limitations"] = res.limitations
             explanation["ConflictDetected"] = False
@@ -326,6 +369,9 @@ class AgentService:
     @property
     def is_live_mode(self) -> bool:
         return self.gemini_provider.is_available()
+
+    def set_api_key(self, api_key: str):
+        self.gemini_provider.set_api_key(api_key)
 
     def process_message_structured(self, message: str, context: SecurityContext, chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         if self.is_live_mode:
