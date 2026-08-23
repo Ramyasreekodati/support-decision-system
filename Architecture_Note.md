@@ -5,36 +5,46 @@ B2B logistics support teams handle high-stakes customer inquiries involving stri
 
 ## 2. Core Architectural Philosophy
 Our architecture enforces strict separation of concerns:
-> **The LLM decides *what to investigate* (tool selection and argument parsing); deterministic, auditable components decide *what the evidence means* (policy rules, data queries, and actions).**
+> **The LLM decides *what to investigate* (tool selection and argument parsing); deterministic, auditable domain engines decide *what the evidence means* (policy rules, data queries, and actions). Streamlit serves strictly as a thin presentation and demonstration client.**
 
 ```
-User Prompt (Natural Language)
-               │
-               ▼
-┌──────────────────────────────────────────────┐
-│        MockToolCallingAgent (Phase 5)        │
-│  - Extracts Intent                           │
-│  - Extracts Entities (e.g. ORD-1001, TKT-501)│
-│  - Selects Sequential Tool Pipeline          │
-└──────────────────────┬───────────────────────┘
-                       │
-       ┌───────────────┼───────────────┐
-       ▼               ▼               ▼
-┌──────────────┐┌──────────────┐┌──────────────┐
-│ Structured   ││ Document     ││ Rule Engines │
-│ Data Store   ││ Store (Docs) ││ (Phases 2-4) │
-│ - get_order  ││ - search_docs││ - evaluate_* │
-│ - get_ticket ││              ││              │
-└──────────────┘└──────────────┘└──────┬───────┘
-                                       │ (if escalation required)
-                                       ▼
-                       ┌───────────────────────────────┐
-                       │     Action Gateway (Phase 4)  │
-                       │ 1. PREPARE Action             │
-                       │ 2. AWAIT Human Confirmation   │
-                       │ 3. REVALIDATE (Auth/Rule/Hash)│
-                       │ 4. EXECUTE & Log Audit Trail  │
-                       └───────────────────────────────┘
+                         USER / EVALUATOR
+                                │
+                                ▼
+                     ┌─────────────────────┐
+                     │ Streamlit Thin UI   │  (app.py - Presentation & User Input)
+                     └──────────┬──────────┘
+                                │
+                                ▼
+                     ┌─────────────────────┐
+                     │    Agent Service    │  (src/agent/agent_service.py)
+                     │ ┌─────────────────┐ │
+                     │ │ Live Gemini     │ │  (Tool-calling bounded reasoning loop)
+                     │ │ LLM Agent       │ │
+                     │ └─────────────────┘ │
+                     └──────────┬──────────┘
+                                │
+                                ▼
+                     ┌─────────────────────┐
+                     │   Tool Dispatcher   │  (src/tools/dispatcher.py)
+                     └──────────┬──────────┘
+        ┌───────────────────────┼───────────────────────┐
+        ▼                       ▼                       ▼
+┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+│ Data Store   │        │ Document     │        │ Rule Engines │
+│ (src/data/)  │        │ Store        │        │ (src/domain/)│
+│ - get_order  │        │ - search_docs│        │ - evaluate_* │
+│ - get_ticket │        │ (filters v2) │        │              │
+└──────┬───────┘        └──────────────┘        └──────┬───────┘
+       │                                               │
+       ▼                                               ▼ (if escalation required)
+┌──────────────┐                                ┌──────────────┐
+│ Security     │                                │ ActionGateway│ (src/actions/)
+│ (src/sec/)   │                                │ 1. PREPARE   │
+│ - is_auth()  │                                │ 2. CONFIRM   │
+│              │                                │ 3. REVALIDATE│
+│              │                                │ 4. EXECUTE   │
+└──────────────┘                                └──────────────┘
 ```
 
 ## 3. Agent & Tool Design (7 Distinct Tools)
