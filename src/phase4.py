@@ -211,6 +211,9 @@ class ActionGateway:
         action["state"] = ActionState.CONFIRM
         return self.revalidate_and_execute(action_id, context)
         
+    def get_pending_action(self, action_id: str) -> Optional[dict]:
+        return self.pending_actions.get(action_id)
+
     def reject(self, action_id: str) -> str:
         if action_id in self.pending_actions:
             action = self.pending_actions[action_id]

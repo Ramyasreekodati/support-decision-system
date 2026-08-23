@@ -1,7 +1,10 @@
 import pathlib
 import sys
+import logging
 import streamlit as st
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add src to sys.path so internal imports (e.g. from phase4) resolve correctly
 sys.path.append(str(pathlib.Path(__file__).resolve().parent / "src"))
@@ -56,6 +59,13 @@ context = SecurityContext(role, scope, snapshot)
 
 st.sidebar.divider()
 st.sidebar.markdown("**Security Model enforced on all queries.**")
+st.sidebar.markdown("""
+**Authorization:**
+✓ Data access scoped
+✓ Document access scoped
+✓ Snapshot locked
+✓ Actions require confirmation
+""")
 st.sidebar.caption("The UI provides a mocked security context for assessment purposes. Production identity and authorization would be supplied by an identity provider/session token.")
 
 agent, gateway = get_backend()
@@ -69,16 +79,17 @@ def render_structured_decision(data):
         return
         
     if "Decision" in data:
-        st.info(f"**Decision:** {data.get('Decision', 'UNKNOWN')}\n\n**Reason:** {data.get('Reason', '')}")
+        decision_str = data.get('Decision', 'UNKNOWN')
+        st.info(f"**Decision:** {decision_str}\n\n**Reason:** {data.get('Reason', '')}")
         
     if data.get('Evidence'):
-        evs = data['Evidence'].split(', ')
+        evs = data['Evidence']
         ev_str = "\n".join([f"• {e}" for e in evs])
         st.success(f"**Evidence**\n────────\n{ev_str}")
             
     if data.get('Limitations'):
-        lims = data['Limitations'].split('. ')
-        lim_str = "\n".join([f"⚠ {l.strip()}" for l in lims if l.strip()])
+        lims = data['Limitations']
+        lim_str = "\n".join([f"⚠ {l}" for l in lims])
         st.warning(f"**Limitations**\n───────────\n{lim_str}")
 
 # Render Chat History
@@ -91,17 +102,22 @@ for msg in st.session_state.messages:
 # Pending Action Panel
 if st.session_state.pending_action:
     action_data = st.session_state.pending_action
-    action_id = action_data["id"]
+    action_id = action_data["action_id"]
     ctx_role = action_data["role"]
     ctx_scope = action_data["scope"]
     
-    # Retrieve action payload from gateway to show details
-    if action_id in gateway.pending_actions:
-        payload = gateway.pending_actions[action_id]["payload"]
-        st.error(f"🚨 **P1 ESCALATION REQUIRED**\n\n"
-                 f"**Ticket:** {payload.get('ticket_id')}\n\n"
-                 f"**SLA:** BREACHED\n\n"
-                 f"**Reason:** {payload.get('reason')}\n\n"
+    # Use get_pending_action to retrieve payload
+    payload = gateway.get_pending_action(action_id)
+    if payload:
+        payload_data = payload["payload"]
+        ticket_id = payload_data.get('ticket_id', 'UNKNOWN')
+        sla_state = action_data.get('decision', 'UNKNOWN')
+        reason = payload_data.get('reason', 'UNKNOWN')
+        
+        st.error(f"🚨 **ACTION REQUIRES APPROVAL**\n\n"
+                 f"**Ticket:** {ticket_id}\n\n"
+                 f"**SLA:** {sla_state}\n\n"
+                 f"**Reason:** {reason}\n\n"
                  f"**Prepared For:** Role: {ctx_role} | Scope: {ctx_scope}")
                  
         col1, col2 = st.columns(2)
@@ -130,7 +146,8 @@ if st.session_state.pending_action:
 
 # User Input
 if prompt := st.chat_input("Ask a support question..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    message_entry = {"role": "user", "content": prompt}
+    st.session_state.messages.append(message_entry)
     with st.chat_message("user"):
         st.markdown(prompt)
         
@@ -140,26 +157,29 @@ if prompt := st.chat_input("Ask a support question..."):
                 structured_data = agent.process_message_structured(prompt, context)
             except PermissionError:
                 structured_data = {"Text": "UNAUTHORIZED: You do not have permission to access this record."}
-            except Exception as e:
-                structured_data = {"Text": "System error: The request could not be completed safely."}
+            except Exception:
+                logger.exception("Agent processing failed")
+                structured_data = {"Text": "SYSTEM ERROR: The request could not be completed safely."}
             
             # Extract Action ID if pending
-            if "Action" in structured_data and "Action ID:" in structured_data["Action"]:
-                action_id = structured_data["Action"].split("Action ID:")[1].strip()
+            action = structured_data.get("Action")
+            if action and action.get("status") == "PREPARED":
                 st.session_state.pending_action = {
-                    "id": action_id,
+                    "action_id": action["action_id"],
+                    "decision": structured_data.get("Decision", "UNKNOWN"),
                     "role": context.role,
                     "scope": ", ".join(list(context.account_scope))
                 }
             
             if structured_data.get("Text"):
                 st.markdown(structured_data["Text"])
+                assistant_message = {"role": "assistant", "content": structured_data["Text"]}
             else:
                 render_structured_decision(structured_data)
+                assistant_message = {"role": "assistant", "content": ""}
                 
-            st.session_state.messages.append({
-                "role": "assistant", 
-                "content": structured_data.get("Text", ""),
-                "decision_data": structured_data if "Decision" in structured_data else None
-            })
+            if "Decision" in structured_data:
+                assistant_message["decision_data"] = structured_data
+                
+            st.session_state.messages.append(assistant_message)
             st.rerun()

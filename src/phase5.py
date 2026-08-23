@@ -96,9 +96,14 @@ class AgentOrchestrator:
         lines = []
         if "Decision" in res: lines.append(f"Decision: {res['Decision']}")
         if "Reason" in res: lines.append(f"Reason: {res['Reason']}")
-        if "Evidence" in res: lines.append(f"Evidence: {res['Evidence']}")
-        if "Limitations" in res: lines.append(f"Limitations: {res['Limitations']}")
-        if "Action" in res: lines.append(f"Action: {res['Action']}")
+        if res.get("Evidence"): lines.append(f"Evidence: {', '.join(res['Evidence'])}")
+        else: lines.append("Evidence: ")
+        
+        if res.get("Limitations"): lines.append(f"Limitations: {' '.join(res['Limitations'])}")
+        if res.get("Action"): 
+            action = res["Action"]
+            if action.get("status") == "PREPARED":
+                lines.append(f"Action: PREPARED. Awaiting human confirmation for Action ID: {action['action_id']}")
         return "\n".join(lines)
         
     def explain_decision_structured(self, result: Any) -> dict:
@@ -117,33 +122,35 @@ class AgentOrchestrator:
                 else:
                     explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
             
-            explanation["Evidence"] = ", ".join(e["source"] for e in getattr(result, "evidence", []))
-            limitations = getattr(result, "limitations", [])
-            if limitations:
-                explanation["Limitations"] = " ".join(limitations)
+            explanation["Evidence"] = [e["source"] for e in getattr(result, "evidence", [])]
+            explanation["Limitations"] = getattr(result, "limitations", [])
+            explanation["Action"] = None
         elif type_name == "ServiceCreditDecision":
             explanation["Decision"] = getattr(result, "eligibility", "UNKNOWN")
             amount = getattr(result, "credit_amount", None)
             rule = getattr(result, "applicable_rule", "none")
             
-            if explanation["Decision"] == "UNKNOWN":
-                explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
-            else:
-                explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
+            explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
             
-            explanation["Evidence"] = ", ".join(e["source"] for e in getattr(result, "evidence", []))
-            limitations = getattr(result, "limitations", [])
-            if limitations:
-                explanation["Limitations"] = " ".join(limitations)
+            explanation["Evidence"] = [e["source"] for e in getattr(result, "evidence", [])]
+            explanation["Limitations"] = getattr(result, "limitations", [])
+            explanation["Action"] = None
         elif type_name == "SLADecision":
             explanation["Decision"] = getattr(result, "state", "UNKNOWN")
             explanation["Reason"] = f"Deadline is {getattr(result, 'deadline', None)}. Escalation requirement: {getattr(result, 'escalation_requirement', 'none')}."
-            explanation["Evidence"] = ", ".join(e["source"] for e in getattr(result, "evidence", []))
-            limitations = getattr(result, "limitations", [])
-            if limitations:
-                explanation["Limitations"] = " ".join(limitations)
+            explanation["Evidence"] = [e["source"] for e in getattr(result, "evidence", [])]
+            explanation["Limitations"] = getattr(result, "limitations", [])
+            
             if hasattr(result, 'pending_action') and result.pending_action:
-                explanation["Action"] = f"PREPARED. Awaiting human confirmation for Action ID: {result.pending_action}"
+                payload = getattr(result, 'escalation_payload', None) or {}
+                explanation["Action"] = {
+                    "status": "PREPARED",
+                    "action_id": result.pending_action,
+                    "type": "ESCALATE_TICKET",
+                    "ticket_id": payload.get('ticket_id', 'UNKNOWN')
+                }
+            else:
+                explanation["Action"] = None
                 
         return explanation
             
