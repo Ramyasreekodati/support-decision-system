@@ -288,6 +288,27 @@ class AgentService:
             logger.info("Executing via DeterministicToolEngine (Offline Mode)")
             return self.offline_engine.execute_turn(message, context)
 
+    def process_message(self, message: str, context: SecurityContext) -> str:
+        res = self.process_message_structured(message, context)
+        if "Text" in res and len(res) == 1:
+            return res["Text"]
+        if "Error" in res:
+            return f"{res['Error']}: You do not have permission to access this record."
+
+        lines = []
+        if "Decision" in res: lines.append(f"Decision: {res['Decision']}")
+        if "Reason" in res: lines.append(f"Reason: {res['Reason']}")
+        if res.get("Evidence"): lines.append(f"Evidence: {', '.join([e['source'] if isinstance(e, dict) else str(e) for e in res['Evidence']])}")
+        else: lines.append("Evidence: ")
+
+        if res.get("Limitations"):
+            lines.append(f"Limitations: {' | '.join(res['Limitations'])}")
+
+        if res.get("Action"):
+            lines.append(f"Action: PREPARED. Awaiting human confirmation for Action ID: {res['Action']['action_id']}")
+
+        return "\n".join(lines)
+
     def get_snapshot_time(self) -> datetime:
         return self.dispatcher.data_store.get_snapshot_time()
 
