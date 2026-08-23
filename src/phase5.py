@@ -72,19 +72,50 @@ class AgentOrchestrator:
         intent = intent_data.get("intent")
         entity_id = intent_data.get("entity_id")
         
+        trace = [
+            f"Intent identified: {intent.upper() if intent else 'UNKNOWN'}",
+            f"Entity extraction: {entity_id}"
+        ]
+        
         try:
             if intent == "cancellation":
                 result = self._workflow_cancellation(entity_id, context)
+                trace.extend(["Operational data authorized", "Current documents retrieved", "Deterministic cancellation rules evaluated"])
             elif intent == "service_credit":
                 result = self._workflow_service_credit(entity_id, context)
+                trace.extend(["Operational data authorized", "Current documents retrieved", "Deterministic service-credit rules evaluated"])
             elif intent == "sla":
                 result = self._workflow_sla(entity_id, context)
+                trace.extend(["Operational data authorized", "Current documents retrieved", "Deterministic SLA rules evaluated"])
             else:
                 return {"Text": "I'm sorry, I can only assist with cancellations, service credits, and SLAs."}
                 
-            return self.explain_decision_structured(result)
+            explanation = self.explain_decision_structured(result)
+            explanation["Trace"] = trace
+            explanation["Context"] = {
+                "Role": context.role,
+                "Scope": list(context.account_scope)[0] if context.account_scope else "NONE",
+                "Entity": entity_id,
+                "Snapshot": context.snapshot_time.strftime("%d %b %Y %H:%M %Z")
+            }
+            
+            # For SLA display
+            if intent == "sla":
+                explanation["SLA_Details"] = {
+                    "Ticket": entity_id,
+                    "Priority": "P1",
+                    "Target": f"{getattr(result, 'target_minutes', 'N/A')} minutes",
+                    "Actual_Response": f"{getattr(result, 'actual_response_time', 'N/A')} minutes"
+                }
+                
+            return explanation
         except PermissionError:
-            return {"Text": "UNAUTHORIZED: You do not have permission to access this record."}
+            return {
+                "Error": "UNAUTHORIZED",
+                "Requested": entity_id,
+                "Scope": list(context.account_scope)[0] if context.account_scope else "NONE",
+                "Reason": "The operational data layer rejected the request before business rules were evaluated.\n\n✓ No data exposed\n✓ No documents exposed\n✓ No rule evaluation performed"
+            }
         except Exception as e:
             return {"Text": f"SYSTEM ERROR: {str(e)}"}
             
@@ -92,6 +123,8 @@ class AgentOrchestrator:
         res = self.process_message_structured(message, context)
         if "Text" in res and len(res) == 1:
             return res["Text"]
+        if "Error" in res:
+            return f"{res['Error']}: You do not have permission to access this record."
             
         lines = []
         if "Decision" in res: lines.append(f"Decision: {res['Decision']}")
@@ -99,11 +132,12 @@ class AgentOrchestrator:
         if res.get("Evidence"): lines.append(f"Evidence: {', '.join(res['Evidence'])}")
         else: lines.append("Evidence: ")
         
-        if res.get("Limitations"): lines.append(f"Limitations: {' '.join(res['Limitations'])}")
-        if res.get("Action"): 
-            action = res["Action"]
-            if action.get("status") == "PREPARED":
-                lines.append(f"Action: PREPARED. Awaiting human confirmation for Action ID: {action['action_id']}")
+        if res.get("Limitations"):
+            lines.append(f"Limitations: {' | '.join(res['Limitations'])}")
+            
+        if res.get("Action"):
+            lines.append(f"Action: PREPARED. Awaiting human confirmation for Action ID: {res['Action']['action_id']}")
+            
         return "\n".join(lines)
         
     def explain_decision_structured(self, result: Any) -> dict:

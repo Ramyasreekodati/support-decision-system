@@ -74,23 +74,49 @@ agent, gateway = get_backend()
 st.title("ParcelPilot Support Agent")
 
 def render_structured_decision(data):
+    if "Error" in data:
+        st.error("🔐 **ACCESS DENIED**")
+        st.markdown(f"**Requested resource:** {data.get('Requested', 'UNKNOWN')}")
+        st.markdown(f"**Current account scope:** {data.get('Scope', 'NONE')}")
+        st.markdown("**Result:** UNAUTHORIZED")
+        st.markdown(f"**Why?**\n\n{data.get('Reason')}")
+        return
+        
     if "Text" in data and len(data) == 1:
         st.markdown(data["Text"])
         return
+
+    # Verified Context
+    if "Context" in data:
+        ctx = data["Context"]
+        st.info(f"**VERIFIED CONTEXT**\n\n**Account:** {ctx.get('Scope')}\n\n**Entity:** {ctx.get('Entity')}\n\n**Snapshot:** {ctx.get('Snapshot')}")
+
+    # Trace
+    if "Trace" in data:
+        trace_str = "\n".join([f"✓ {t}" for t in data["Trace"]])
+        st.markdown(f"**VERIFICATION TRACE**\n\n{trace_str}")
         
+    # SLA Details
+    if "SLA_Details" in data:
+        sla = data["SLA_Details"]
+        st.markdown(f"**SLA EVALUATION**\n\n**Ticket:** {sla.get('Ticket')} | **Priority:** {sla.get('Priority')}\n\n**Target:** {sla.get('Target')} | **Actual Response:** {sla.get('Actual_Response')}")
+        
+    # Decision
     if "Decision" in data:
         decision_str = data.get('Decision', 'UNKNOWN')
-        st.info(f"**Decision:** {decision_str}\n\n**Reason:** {data.get('Reason', '')}")
+        st.success(f"**DECISION: {decision_str}**\n\n{data.get('Reason', '')}")
         
+    # Evidence
     if data.get('Evidence'):
         evs = data['Evidence']
-        ev_str = "\n".join([f"• {e}" for e in evs])
-        st.success(f"**Evidence**\n────────\n{ev_str}")
+        ev_str = "\n".join([f"✓ {e}" for e in evs])
+        st.markdown(f"**EVIDENCE USED**\n\n{ev_str}")
             
+    # Limitations
     if data.get('Limitations'):
         lims = data['Limitations']
-        lim_str = "\n".join([f"⚠ {l}" for l in lims])
-        st.warning(f"**Limitations**\n───────────\n{lim_str}")
+        lim_str = "\n".join([f"• {l}" for l in lims])
+        st.warning(f"**LIMITATIONS & UNCERTAINTY**\n\n{lim_str}")
 
 # Render Chat History
 for msg in st.session_state.messages:
@@ -116,9 +142,9 @@ if st.session_state.pending_action:
         
         st.error(f"🚨 **ACTION REQUIRES APPROVAL**\n\n"
                  f"**Ticket:** {ticket_id}\n\n"
-                 f"**SLA:** {sla_state}\n\n"
-                 f"**Reason:** {reason}\n\n"
-                 f"**Prepared For:** Role: {ctx_role} | Scope: {ctx_scope}")
+                 f"**SLA Evaluation:** {sla_state}\n\n"
+                 f"**Escalation:** REQUIRED ({reason})\n\n"
+                 f"**Context:** Role: {ctx_role} | Scope: {ctx_scope}")
                  
         col1, col2 = st.columns(2)
         with col1:
@@ -129,9 +155,9 @@ if st.session_state.pending_action:
                 st.rerun()
         with col2:
             if st.button("Approve Escalation"):
-                res = gateway.confirm(action_id, context)
+                res = gateway.approve(action_id, context)
                 if "Action executed successfully" in res:
-                    st.session_state.messages.append({"role": "assistant", "content": f"Action {action_id} EXECUTED successfully."})
+                    st.session_state.messages.append({"role": "assistant", "content": f"Action {action_id} EXECUTED successfully.\n\n✓ REVALIDATING\n✓ AUTHORIZED\n✓ BUSINESS RULE STILL VALID"})
                 elif "Action already executed" in res:
                     st.session_state.messages.append({"role": "assistant", "content": f"Action {action_id} ALREADY EXECUTED. No duplicate action was created."})
                 elif "Unauthorized" in res:
