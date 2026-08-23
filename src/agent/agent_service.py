@@ -247,30 +247,43 @@ class DeterministicToolEngine:
                 self._run_tool("evaluate_service_credit", {"order_id": target_ord}, context, tool_trace)
                 return self._build_deterministic_response(tool_trace, context, intent="service_credit", entity_id=target_ord)
 
-            elif ("sla" in user_lower or "p1" in user_lower or "escalat" in user_lower or "breach" in user_lower or "response" in user_lower or "deadline" in user_lower):
+            elif (
+                ticket_id
+                or "ticket" in user_lower
+                or "tkt" in user_lower
+                or "sla" in user_lower
+                or "p1" in user_lower
+                or "p2" in user_lower
+                or "escalat" in user_lower
+                or "breach" in user_lower
+                or "response" in user_lower
+                or "deadline" in user_lower
+                or ("status" in user_lower and not order_id)
+            ):
                 target_tkt = self._resolve_account_ticket(context, ticket_id)
                 self._run_tool("get_ticket", {"ticket_id": target_tkt}, context, tool_trace)
-                self._run_tool("search_documents", {"query": "SLA policy"}, context, tool_trace)
+                self._run_tool("search_documents", {"query": "SLA and Support Operations Policy"}, context, tool_trace)
                 self._run_tool("evaluate_sla", {"ticket_id": target_tkt}, context, tool_trace)
                 return self._build_deterministic_response(tool_trace, context, intent="sla", entity_id=target_tkt)
 
-            elif "billing" in user_lower or "contact" in user_lower:
-                self._run_tool("search_documents", {"query": "billing contact"}, context, tool_trace)
+            elif "billing" in user_lower or "contact" in user_lower or "email" in user_lower:
+                self._run_tool("search_documents", {"query": "billing contact email update"}, context, tool_trace)
                 return {
-                    "Text": "To update your billing contact email, please submit an account update request to support@parcelpilot.com or contact your assigned CSM.",
+                    "Text": "To update your billing contact email, submit an account configuration update to support@parcelpilot.com or contact your assigned CSM. Updates are processed within 1 business day under General Support Operations Policy v2.",
                     "tool_trace": tool_trace,
                     "Mode": "OFFLINE_DETERMINISTIC_TEST_ENGINE"
                 }
 
-            elif order_id:
-                self._run_tool("get_order", {"order_id": order_id}, context, tool_trace)
-                self._run_tool("search_documents", {"query": "cancellation"}, context, tool_trace)
-                self._run_tool("evaluate_cancellation", {"order_id": order_id}, context, tool_trace)
-                return self._build_deterministic_response(tool_trace, context, intent="cancellation", entity_id=order_id)
+            elif order_id or "order" in user_lower or "booking" in user_lower or "shipment" in user_lower:
+                target_ord = self._resolve_account_order(context, order_id)
+                self._run_tool("get_order", {"order_id": target_ord}, context, tool_trace)
+                self._run_tool("search_documents", {"query": "cancellation policy"}, context, tool_trace)
+                self._run_tool("evaluate_cancellation", {"order_id": target_ord}, context, tool_trace)
+                return self._build_deterministic_response(tool_trace, context, intent="cancellation", entity_id=target_ord)
 
             else:
                 return {
-                    "Text": "I'm the ParcelPilot Support Agent. I can assist with order cancellations (e.g. ORD-1001, ORD-2001), service credit eligibility, SLA tracking (e.g. TKT-501), and proactive queue analytics.",
+                    "Text": "I'm the ParcelPilot Support Agent. I can assist with order cancellations (e.g. ORD-1001, ORD-2001), service credit eligibility, SLA tracking (e.g. TKT-501, TKT-505), and proactive operations analytics.",
                     "Mode": "OFFLINE_DETERMINISTIC_TEST_ENGINE"
                 }
 
