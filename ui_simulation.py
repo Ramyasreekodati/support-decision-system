@@ -1,9 +1,10 @@
 import pathlib
 import sys
-from src.phase4 import SecurityContext, IST
-from datetime import datetime
-from src.phase5 import AgentOrchestrator
-from src.phase4 import DocumentStore, OperationalDataStore, ActionGateway
+from src.security.authorization import SecurityContext, IST
+from src.data.document_store import DocumentStore
+from src.data.operational_store import OperationalDataStore
+from src.actions.action_gateway import ActionGateway
+from src.agent.agent_service import AgentService as AgentOrchestrator
 
 print("\n=== MANUAL UI TEST SIMULATION ===")
 
@@ -12,8 +13,7 @@ data = OperationalDataStore(pathlib.Path(__file__).resolve().parent / "ParcelPil
 snapshot = data.get_snapshot_time()  # dynamic — same source as app.py
 docs = DocumentStore()
 gateway = ActionGateway(data, docs, None)
-agent = AgentOrchestrator(data, docs, gateway)
-gateway.rule_engine = agent.p4_engine 
+agent = AgentOrchestrator(data, docs, gateway) 
 
 admin_ctx = SecurityContext("support_admin", frozenset(["ALL"]), snapshot)
 lw_ctx = SecurityContext("customer", frozenset(["ACCT-002"]), snapshot)

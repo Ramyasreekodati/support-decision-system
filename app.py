@@ -18,15 +18,14 @@ if str(ROOT) not in sys.path:
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from src.phase4 import (
+from src.security.authorization import (
     SecurityContext,
-    DocumentStore,
-    OperationalDataStore,
-    ActionGateway,
     IST,
 )
-
-from src.phase5 import AgentOrchestrator
+from src.data.document_store import DocumentStore
+from src.data.operational_store import OperationalDataStore
+from src.actions.action_gateway import ActionGateway
+from src.agent.agent_service import AgentService as AgentOrchestrator
 
 
 # ============================================================
@@ -253,8 +252,10 @@ def get_backend():
         gateway,
     )
 
-    # Existing Phase 5 / Phase 4 integration contract.
-    gateway.rule_engine = agent.p4_engine
+    if hasattr(agent, "dispatcher"):
+        gateway.rule_engine = agent.dispatcher.sla_engine
+    elif hasattr(agent, "p4_engine"):
+        gateway.rule_engine = agent.p4_engine
 
     return agent, gateway
 
