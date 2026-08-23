@@ -50,7 +50,7 @@ class TestEndToEnd(unittest.TestCase):
     def test_e2e_4_p1_deadline_elapsed(self):
         reply = self.agent.process_message("SLA for TKT-501", self.admin_ctx)
         self.assertIn("Decision: DEADLINE_ELAPSED", reply)
-        self.assertIn("Actual breach cannot be verified", reply)
+        self.assertIn("Actual SLA breach cannot be verified because first_response_at is missing", reply)
         
     # 5. Cross-account access → UNAUTHORIZED
     def test_e2e_5_cross_account(self):

@@ -167,7 +167,7 @@ class RuleEngine:
             if snapshot_time <= deadline:
                 return SLADecision("NOT_DUE", target_minutes, deadline, None, evidence, [], "REQUIRED", escalation_payload)
             else:
-                return SLADecision("DEADLINE_ELAPSED", target_minutes, deadline, None, evidence, ["Actual breach cannot be verified due to missing response timestamp."], "REQUIRED", escalation_payload)
+                return SLADecision("DEADLINE_ELAPSED", target_minutes, deadline, None, evidence, ["Actual SLA breach cannot be verified because first_response_at is missing."], "REQUIRED", escalation_payload)
                 
         first_response = pd.to_datetime(first_response_raw).tz_localize(IST)
         actual_response_time = int((first_response - created_at).total_seconds() / 60)
