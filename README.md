@@ -34,13 +34,14 @@ Trust is built on rigid separation of concerns:
    ```
 
 ## How do I test it?
-To execute the complete 51-test deterministic verification suite:
+To execute the modular unit, integration, and end-to-end test suite:
 ```bash
-# Windows/PowerShell
-$env:PYTHONPATH="src"; python -m unittest src.phase2_verification src.phase3 src.phase4 src.phase5 e2e_tests
+python -m unittest discover -s tests -p "test_*.py"
+```
 
-# Linux/Mac
-PYTHONPATH="src" python -m unittest src.phase2_verification src.phase3 src.phase4 src.phase5 e2e_tests
+Or run the scenario verification harness:
+```bash
+python ui_simulation.py
 ```
 
 ## What are its limitations?
