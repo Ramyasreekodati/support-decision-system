@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 from typing import Dict, Any, List, Optional
 from src.security.authorization import SecurityContext
@@ -130,18 +130,32 @@ class ToolDispatcher:
             return ticket
 
         elif tool_name == "search_documents":
+            query = args.get("query", "").lower()
             docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
             self.collected_state["docs"] = docs
-            doc_summaries = []
+            
+            results = []
             for d in docs:
                 fn = d.get("metadata", {}).get("filename", "")
+                content = d.get("content", "")
                 auth = "CUSTOMER_SPECIFIC" if "Agreement" in fn else "GENERAL_POLICY"
-                doc_summaries.append({
+                
+                # Extract relevant text snippets if query keywords match
+                snippets = []
+                if query:
+                    keywords = [k for k in query.split() if len(k) > 2]
+                    paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+                    for p in paragraphs:
+                        if any(k in p.lower() for k in keywords):
+                            snippets.append(p[:300])
+                
+                results.append({
                     "filename": fn,
                     "authority": auth,
-                    "precedence": "HIGH" if auth == "CUSTOMER_SPECIFIC" else "STANDARD"
+                    "precedence": "HIGH" if auth == "CUSTOMER_SPECIFIC" else "STANDARD",
+                    "matched_snippets": snippets[:3] if snippets else ["Document available for full rule evaluation."]
                 })
-            return {"retrieved_count": len(docs), "documents": doc_summaries}
+            return {"retrieved_count": len(results), "documents": results}
 
         elif tool_name == "evaluate_cancellation":
             order_id = args.get("order_id", "").strip().upper()
