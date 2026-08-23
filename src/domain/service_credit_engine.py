@@ -27,6 +27,9 @@ class ServiceCreditEngine:
         shipment_fee = order_facts.get('shipment_fee_inr')
         
         window_end_raw = order_facts.get('pickup_window_end')
+        window_end = pd.to_datetime(window_end_raw).tz_localize(IST) if not pd.isna(window_end_raw) and window_end_raw is not None else None
+        actual_pickup = order_facts.get('pickup_actual_at')
+
         evidence = []
         conditions_checked = []
         conditions_missing = []
