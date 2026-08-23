@@ -338,6 +338,15 @@ st.session_state.last_context_key = context_key
 
 st.sidebar.divider()
 
+st.sidebar.markdown("### Agent Engine Mode")
+
+if getattr(agent, "service", None) and agent.service.is_live_mode:
+    st.sidebar.success("🤖 **LIVE AGENT** — Gemini Tool Calling")
+else:
+    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**<br><span style='font-size:0.8rem; color:#667085;'>Deterministic test fixture (set <code>GEMINI_API_KEY</code> for live LLM agent)</span>", unsafe_allow_html=True)
+
+st.sidebar.divider()
+
 st.sidebar.markdown("### System Guardrails")
 
 st.sidebar.markdown(
