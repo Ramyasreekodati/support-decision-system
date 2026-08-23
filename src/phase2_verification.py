@@ -1,3 +1,4 @@
+import pathlib
 import unittest
 import pandas as pd
 from dataclasses import dataclass, field
@@ -178,7 +179,7 @@ class AgentOrchestrator:
 class TestPhase2Verification(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.data_store = OperationalDataStore("g:/ParcelPilot/ParcelPilot_Assessment_Data.xlsx")
+        cls.data_store = OperationalDataStore(pathlib.Path(__file__).resolve().parent.parent / "ParcelPilot_Assessment_Data.xlsx")
         cls.doc_store = DocumentStore()
         cls.rule_engine = RuleEngine()
         cls.agent = AgentOrchestrator(cls.data_store, cls.doc_store, cls.rule_engine)

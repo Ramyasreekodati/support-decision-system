@@ -1,3 +1,4 @@
+import pathlib
 import unittest
 import pandas as pd
 import pypdf

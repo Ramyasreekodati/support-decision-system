@@ -1,3 +1,4 @@
+import pathlib
 import unittest
 from datetime import datetime
 from src.phase4 import SecurityContext, DocumentStore, OperationalDataStore, ActionGateway, IST
@@ -6,7 +7,7 @@ from src.phase5 import AgentOrchestrator
 class TestEndToEnd(unittest.TestCase):
     def setUp(self):
         self.snapshot = IST.localize(datetime(2026, 8, 16, 11, 0))
-        self.data = OperationalDataStore("g:/ParcelPilot/ParcelPilot_Assessment_Data.xlsx")
+        self.data = OperationalDataStore(pathlib.Path(__file__).resolve().parent / "ParcelPilot_Assessment_Data.xlsx")
         self.docs = DocumentStore()
         
         # Build gateway and orchestrator

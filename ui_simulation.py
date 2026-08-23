@@ -1,3 +1,4 @@
+import pathlib
 import sys
 from src.phase4 import SecurityContext, IST
 from datetime import datetime
@@ -8,7 +9,7 @@ print("\n=== MANUAL UI TEST SIMULATION ===")
 
 # Streamlit Backend Emulation
 snapshot = IST.localize(datetime(2026, 8, 16, 11, 0))
-data = OperationalDataStore("g:/ParcelPilot/ParcelPilot_Assessment_Data.xlsx")
+data = OperationalDataStore(pathlib.Path(__file__).resolve().parent / "ParcelPilot_Assessment_Data.xlsx")
 docs = DocumentStore()
 gateway = ActionGateway(data, docs, None)
 agent = AgentOrchestrator(data, docs, gateway)

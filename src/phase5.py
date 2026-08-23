@@ -1,3 +1,4 @@
+import pathlib
 import unittest
 from typing import Dict, Any, Optional
 from phase4 import SecurityContext, RetrievalMode, DocumentStore, OperationalDataStore, RuleEngine as Phase4Engine, ActionGateway, IST
@@ -65,61 +66,115 @@ class AgentOrchestrator:
         self.action_gateway = action_gateway
         self.llm = MockLLM()
         
-    def process_message(self, user_input: str, context: SecurityContext) -> str:
-        # Step 1: LLM extracts intent
-        intent_data = self.llm.extract_intent(user_input)
+
+    def process_message_structured(self, message: str, context: SecurityContext) -> dict:
+        intent_data = self.llm.extract_intent(message)
         intent = intent_data.get("intent")
         entity_id = intent_data.get("entity_id")
         
         try:
-            # Step 2: Route to deterministic workflow
             if intent == "cancellation":
-                return self._workflow_cancellation(entity_id, context)
+                result = self._workflow_cancellation(entity_id, context)
             elif intent == "service_credit":
-                return self._workflow_service_credit(entity_id, context)
+                result = self._workflow_service_credit(entity_id, context)
             elif intent == "sla":
-                return self._workflow_sla(entity_id, context)
+                result = self._workflow_sla(entity_id, context)
             else:
-                return "I can only assist with cancellations, service credits, and SLA evaluations at this time."
+                return {"Text": "I'm sorry, I can only assist with cancellations, service credits, and SLAs."}
                 
+            return self.explain_decision_structured(result)
         except PermissionError:
-            return "UNAUTHORIZED: You do not have permission to access this record."
+            return {"Text": "UNAUTHORIZED: You do not have permission to access this record."}
         except Exception as e:
-            return f"SYSTEM ERROR: {str(e)}"
+            return {"Text": f"SYSTEM ERROR: {str(e)}"}
             
-    def _workflow_cancellation(self, order_id: str, context: SecurityContext) -> str:
-        order = self.data_store.query_orders(context, order_id)
-        if not order: return "Order not found."
-        docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
-        res = self.p2_engine.evaluate_cancellation(order, docs, context.snapshot_time)
-        return self.llm.explain_decision("cancellation", res)
+    def process_message(self, message: str, context: SecurityContext) -> str:
+        res = self.process_message_structured(message, context)
+        if "Text" in res and len(res) == 1:
+            return res["Text"]
+            
+        lines = []
+        if "Decision" in res: lines.append(f"Decision: {res['Decision']}")
+        if "Reason" in res: lines.append(f"Reason: {res['Reason']}")
+        if "Evidence" in res: lines.append(f"Evidence: {res['Evidence']}")
+        if "Limitations" in res: lines.append(f"Limitations: {res['Limitations']}")
+        if "Action" in res: lines.append(f"Action: {res['Action']}")
+        return "\n".join(lines)
         
-    def _workflow_service_credit(self, order_id: str, context: SecurityContext) -> str:
+    def explain_decision_structured(self, result: Any) -> dict:
+        explanation = {}
+        type_name = type(result).__name__
+        if type_name == "DecisionResult":
+            explanation["Decision"] = getattr(result, "decision", "UNKNOWN")
+            amount = getattr(result, "amount", None)
+            rule = getattr(result, "applicable_rule", "none")
+            
+            if explanation["Decision"] == "UNKNOWN":
+                explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
+            else:
+                if rule != "general_cancellation_sop" or amount == 250:
+                    explanation["Reason"] = f"Cancellation fee evaluates to {amount} based on {rule}." 
+                else:
+                    explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
+            
+            explanation["Evidence"] = ", ".join(e["source"] for e in getattr(result, "evidence", []))
+            limitations = getattr(result, "limitations", [])
+            if limitations:
+                explanation["Limitations"] = " ".join(limitations)
+        elif type_name == "ServiceCreditDecision":
+            explanation["Decision"] = getattr(result, "eligibility", "UNKNOWN")
+            amount = getattr(result, "credit_amount", None)
+            rule = getattr(result, "applicable_rule", "none")
+            
+            if explanation["Decision"] == "UNKNOWN":
+                explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
+            else:
+                explanation["Reason"] = f"Credit evaluates to {amount} based on {rule}."
+            
+            explanation["Evidence"] = ", ".join(e["source"] for e in getattr(result, "evidence", []))
+            limitations = getattr(result, "limitations", [])
+            if limitations:
+                explanation["Limitations"] = " ".join(limitations)
+        elif type_name == "SLADecision":
+            explanation["Decision"] = getattr(result, "state", "UNKNOWN")
+            explanation["Reason"] = f"Deadline is {getattr(result, 'deadline', None)}. Escalation requirement: {getattr(result, 'escalation_requirement', 'none')}."
+            explanation["Evidence"] = ", ".join(e["source"] for e in getattr(result, "evidence", []))
+            limitations = getattr(result, "limitations", [])
+            if limitations:
+                explanation["Limitations"] = " ".join(limitations)
+            if hasattr(result, 'pending_action') and result.pending_action:
+                explanation["Action"] = f"PREPARED. Awaiting human confirmation for Action ID: {result.pending_action}"
+                
+        return explanation
+            
+    def _workflow_cancellation(self, order_id: str, context: SecurityContext):
         order = self.data_store.query_orders(context, order_id)
-        if not order: return "Order not found."
+        if not order: raise Exception("Order not found.")
         docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
-        res = self.p3_engine.evaluate_service_credit(order, docs, context.snapshot_time)
-        return self.llm.explain_decision("service_credit", res)
+        return self.p2_engine.evaluate_cancellation(order, docs, context.snapshot_time)
         
-    def _workflow_sla(self, ticket_id: str, context: SecurityContext) -> str:
+    def _workflow_service_credit(self, order_id: str, context: SecurityContext):
+        order = self.data_store.query_orders(context, order_id)
+        if not order: raise Exception("Order not found.")
+        docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
+        return self.p3_engine.evaluate_service_credit(order, docs, context.snapshot_time)
+        
+    def _workflow_sla(self, ticket_id: str, context: SecurityContext):
         ticket = self.data_store.query_tickets(context, ticket_id)
-        if not ticket: return "Ticket not found."
+        if not ticket: raise Exception("Ticket not found.")
         docs = self.doc_store.retrieve(context, RetrievalMode.CURRENT)
-        
-        # We assume P1 for the prompt tests, but in reality we'd check ticket['subject'] or similar. 
         # For this prototype, we force is_p1=True to test the P1 escalation paths.
         res = self.p4_engine.evaluate_sla(ticket, docs, context.snapshot_time, is_p1=True)
-        
         action_id = None
-        if getattr(res, 'escalation_requirement', '') == "REQUIRED" and getattr(res, 'escalation_payload', None):
+        if res.escalation_requirement == "REQUIRED" and self.action_gateway:
             action_id = self.action_gateway.prepare(context, res.escalation_payload)
-            
-        return self.llm.explain_decision("sla", res, action_id)
+            res.pending_action = action_id
+        return res
 
 class TestPhase5Orchestration(unittest.TestCase):
     def setUp(self):
         self.snapshot = IST.localize(datetime(2026, 8, 16, 11, 0))
-        self.data = OperationalDataStore("g:/ParcelPilot/ParcelPilot_Assessment_Data.xlsx")
+        self.data = OperationalDataStore(pathlib.Path(__file__).resolve().parent.parent / "ParcelPilot_Assessment_Data.xlsx")
         self.docs = DocumentStore()
         self.p4_rule = Phase4Engine()
         self.gateway = ActionGateway(self.data, self.docs, self.p4_rule)

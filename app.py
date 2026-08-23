@@ -1,6 +1,6 @@
+import pathlib
 import streamlit as st
 from datetime import datetime
-import traceback
 
 # Import backend orchestrator and models
 from src.phase4 import SecurityContext, DocumentStore, OperationalDataStore, ActionGateway, IST
@@ -12,128 +12,150 @@ if 'messages' not in st.session_state:
 if 'pending_action' not in st.session_state:
     st.session_state.pending_action = None
 
-@st.cache_resource
-def get_backend():
-    snapshot = IST.localize(datetime(2026, 8, 16, 11, 0))
-    data = OperationalDataStore("g:/ParcelPilot/ParcelPilot_Assessment_Data.xlsx")
-    docs = DocumentStore()
-    gateway = ActionGateway(data, docs, None) # It gets patched in agent orchestrator if needed, but phase5 handles it
-    agent = AgentOrchestrator(data, docs, gateway)
-    
-    # We must patch the gateway inside agent orchestrator to use the proper engine
-    gateway.rule_engine = agent.p4_engine 
-    
-    return agent, gateway, snapshot
+DATA_PATH = pathlib.Path(__file__).resolve().parent / "ParcelPilot_Assessment_Data.xlsx"
 
-agent, gateway, snapshot = get_backend()
+@st.cache_resource
+def get_data_store():
+    return OperationalDataStore(DATA_PATH)
+
+@st.cache_resource
+def get_document_store():
+    return DocumentStore()
+
+if "gateway" not in st.session_state:
+    st.session_state.gateway = ActionGateway(get_data_store(), get_document_store(), None)
+
+# We do NOT cache the stateful components across the global server. Create/retrieve per user session.
+def get_backend():
+    data = get_data_store()
+    docs = get_document_store()
+    gateway = st.session_state.gateway
+    agent = AgentOrchestrator(data, docs, gateway)
+    gateway.rule_engine = agent.p4_engine 
+    return agent, gateway
 
 # --- SIDEBAR: CONTEXT ---
 st.sidebar.title("Session Context")
-st.sidebar.markdown(f"**Snapshot:** {snapshot.strftime('%d %b %Y %H:%M %Z')}")
+st.sidebar.markdown("**Assessment Snapshot (fixed): 16 Aug 2026 11:00 IST**")
+snapshot = IST.localize(datetime(2026, 8, 16, 11, 0))
 
-role = st.sidebar.selectbox("Role", ["support_agent", "customer", "support_admin"], index=0)
-account = st.sidebar.selectbox("Account Scope", ["ACCT-001 (Northstar)", "ACCT-002 (LumenWorks)", "ALL"], index=0)
+role = st.sidebar.selectbox("Role", ["customer", "support_agent", "support_admin"], index=1)
 
-scope = frozenset([account.split(" ")[0]]) if account != "ALL" else frozenset(["ALL"])
+if role == "customer" or role == "support_agent":
+    account = st.sidebar.selectbox("Account Scope", ["ACCT-001 (Northstar)", "ACCT-002 (LumenWorks)"], index=0)
+    scope = frozenset([account.split(" ")[0]])
+else:
+    st.sidebar.markdown("**Scope: ALL**")
+    scope = frozenset(["ALL"])
+
 context = SecurityContext(role, scope, snapshot)
 
 st.sidebar.divider()
 st.sidebar.markdown("**Security Model enforced on all queries.**")
+st.sidebar.caption("The UI provides a mocked security context for assessment purposes. Production identity and authorization would be supplied by an identity provider/session token.")
+
+agent, gateway = get_backend()
 
 # --- MAIN UI ---
 st.title("ParcelPilot Support Agent")
+
+def render_structured_decision(data):
+    if "Text" in data and len(data) == 1:
+        st.markdown(data["Text"])
+        return
+        
+    if "Decision" in data:
+        st.info(f"**Decision:** {data.get('Decision', 'UNKNOWN')}\n\n**Reason:** {data.get('Reason', '')}")
+        
+    if data.get('Evidence'):
+        evs = data['Evidence'].split(', ')
+        ev_str = "\n".join([f"• {e}" for e in evs])
+        st.success(f"**Evidence**\n────────\n{ev_str}")
+            
+    if data.get('Limitations'):
+        lims = data['Limitations'].split('. ')
+        lim_str = "\n".join([f"⚠ {l.strip()}" for l in lims if l.strip()])
+        st.warning(f"**Limitations**\n───────────\n{lim_str}")
 
 # Render Chat History
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        
-        # If there's structured data to render
         if "decision_data" in msg:
-            data = msg["decision_data"]
-            
-            # Decision Panel
-            st.info(f"**Decision:** {data.get('Decision', 'UNKNOWN')}\n\n**Reason:** {data.get('Reason', '')}")
-            
-            # Evidence Panel
-            if data.get('Evidence'):
-                st.success(f"**Evidence:**\n{data.get('Evidence')}")
-                
-            # Limitations Panel (Uncertainty)
-            if data.get('Limitations'):
-                st.warning(f"**Limitations / Uncertainty:**\n{data.get('Limitations')}")
+            render_structured_decision(msg["decision_data"])
 
 # Pending Action Panel
 if st.session_state.pending_action:
-    action_id = st.session_state.pending_action
-    st.error(f"🚨 **ACTION REQUIRES APPROVAL**\n\nAction ID: {action_id}")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Reject"):
-            st.session_state.messages.append({"role": "assistant", "content": f"Action {action_id} REJECTED by human."})
-            st.session_state.pending_action = None
-            st.rerun()
-    with col2:
-        if st.button("Approve Escalation"):
-            res = gateway.confirm(action_id, context)
-            if "executed successfully" in res or "idempotent" in res:
-                st.session_state.messages.append({"role": "assistant", "content": f"Action {action_id} APPROVED. Result: {res}"})
-            else:
-                st.session_state.messages.append({"role": "assistant", "content": f"Execution Failed: {res}"})
-            st.session_state.pending_action = None
-            st.rerun()
+    action_data = st.session_state.pending_action
+    action_id = action_data["id"]
+    ctx_role = action_data["role"]
+    ctx_scope = action_data["scope"]
+    
+    # Retrieve action payload from gateway to show details
+    if action_id in gateway.pending_actions:
+        payload = gateway.pending_actions[action_id]["payload"]
+        st.error(f"🚨 **P1 ESCALATION REQUIRED**\n\n"
+                 f"**Ticket:** {payload.get('ticket_id')}\n\n"
+                 f"**SLA:** BREACHED\n\n"
+                 f"**Reason:** {payload.get('reason')}\n\n"
+                 f"**Prepared For:** Role: {ctx_role} | Scope: {ctx_scope}")
+                 
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Reject"):
+                st.session_state.messages.append({"role": "assistant", "content": f"Action {action_id} REJECTED by human."})
+                gateway.reject(action_id)
+                st.session_state.pending_action = None
+                st.rerun()
+        with col2:
+            if st.button("Approve Escalation"):
+                res = gateway.confirm(action_id, context)
+                if "Action executed successfully" in res:
+                    st.session_state.messages.append({"role": "assistant", "content": f"Action {action_id} EXECUTED successfully."})
+                elif "Action already executed" in res:
+                    st.session_state.messages.append({"role": "assistant", "content": f"Action {action_id} ALREADY EXECUTED. No duplicate action was created."})
+                elif "Unauthorized" in res:
+                    st.session_state.messages.append({"role": "assistant", "content": f"Execution Failed: UNAUTHORIZED."})
+                elif "Revalidation failed" in res:
+                    st.session_state.messages.append({"role": "assistant", "content": f"Execution Failed: {res}"})
+                else:
+                    st.session_state.messages.append({"role": "assistant", "content": f"Execution Failed: {res}"})
+                    
+                st.session_state.pending_action = None
+                st.rerun()
 
 # User Input
 if prompt := st.chat_input("Ask a support question..."):
-    # Append user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
         
-    # Process
     with st.chat_message("assistant"):
         with st.spinner("Evaluating deterministic rules..."):
-            reply = agent.process_message(prompt, context)
-            
-            # Very basic parser for the rigid LLM explanation string to map to UI components
-            # "Decision: ...\nReason: ...\nEvidence: ...\nLimitations: ...\nAction: ..."
-            structured_data = {}
-            lines = reply.split('\n')
-            current_key = "Text"
-            structured_data[current_key] = ""
-            
-            for line in lines:
-                if line.startswith("Decision:"): current_key = "Decision"; structured_data[current_key] = line.replace("Decision:", "").strip()
-                elif line.startswith("Reason:"): current_key = "Reason"; structured_data[current_key] = line.replace("Reason:", "").strip()
-                elif line.startswith("Evidence:"): current_key = "Evidence"; structured_data[current_key] = line.replace("Evidence:", "").strip()
-                elif line.startswith("Limitations:"): current_key = "Limitations"; structured_data[current_key] = line.replace("Limitations:", "").strip()
-                elif line.startswith("Action:"): current_key = "Action"; structured_data[current_key] = line.replace("Action:", "").strip()
-                elif line.startswith("UNAUTHORIZED:") or line.startswith("SYSTEM ERROR:"):
-                    structured_data["Text"] = line
-                else:
-                    if current_key in structured_data:
-                        structured_data[current_key] += " " + line.strip()
+            try:
+                structured_data = agent.process_message_structured(prompt, context)
+            except PermissionError:
+                structured_data = {"Text": "UNAUTHORIZED: You do not have permission to access this record."}
+            except Exception as e:
+                structured_data = {"Text": "System error: The request could not be completed safely."}
             
             # Extract Action ID if pending
             if "Action" in structured_data and "Action ID:" in structured_data["Action"]:
                 action_id = structured_data["Action"].split("Action ID:")[1].strip()
-                st.session_state.pending_action = action_id
+                st.session_state.pending_action = {
+                    "id": action_id,
+                    "role": context.role,
+                    "scope": ", ".join(list(context.account_scope))
+                }
             
-            # Display
             if structured_data.get("Text"):
                 st.markdown(structured_data["Text"])
-            if "Decision" in structured_data:
-                st.info(f"**Decision:** {structured_data.get('Decision')}\n\n**Reason:** {structured_data.get('Reason')}")
-            if structured_data.get('Evidence'):
-                st.success(f"**Evidence:**\n{structured_data.get('Evidence')}")
-            if structured_data.get('Limitations'):
-                st.warning(f"**Limitations / Uncertainty:**\n{structured_data.get('Limitations')}")
+            else:
+                render_structured_decision(structured_data)
                 
-            # Store in history
             st.session_state.messages.append({
                 "role": "assistant", 
                 "content": structured_data.get("Text", ""),
-                "decision_data": structured_data
+                "decision_data": structured_data if "Decision" in structured_data else None
             })
-            
             st.rerun()

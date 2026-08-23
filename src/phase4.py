@@ -1,3 +1,4 @@
+import pathlib
 import unittest
 import pandas as pd
 from dataclasses import dataclass, field
@@ -264,7 +265,7 @@ class TestPhase4SLA(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.snapshot_time = IST.localize(datetime(2026, 8, 16, 11, 0))
-        cls.data_store = OperationalDataStore("g:/ParcelPilot/ParcelPilot_Assessment_Data.xlsx")
+        cls.data_store = OperationalDataStore(pathlib.Path(__file__).resolve().parent.parent / "ParcelPilot_Assessment_Data.xlsx")
         cls.doc_store = DocumentStore()
         cls.rule_engine = RuleEngine()
         
