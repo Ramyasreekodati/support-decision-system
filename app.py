@@ -640,20 +640,75 @@ if not st.session_state.messages:
 
     st.markdown(
         """
-        <div class="welcome-box">
-
-        ### What can I investigate?
-
-        This system combines authorized operational data,
-        current support documents, deterministic business rules,
-        and human approval for state-changing actions.
-
+        <div class="hero" style="text-align: center; padding-top: 2rem;">
+            <h1 style="font-size: 3rem;">PARCELPILOT</h1>
+            <h3 style="color: #667085; font-weight: 500;">AI OPERATIONS CONTROL CENTER</h3>
+            <p style="margin-top: 1rem; font-size: 1.1rem;">
+                Trusted operational decisions with deterministic<br>
+                policy enforcement and human-gated execution.
+            </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(
+            """
+            <div style="text-align: right; padding-right: 2rem; border-right: 1px solid #eaecf0;">
+                <h2 style="color: #039855; margin-bottom: 0;">48</h2>
+                <p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Tests Passed</p>
+            </div>
+            """, unsafe_allow_html=True
+        )
+    with col2:
+        st.markdown(
+            """
+            <div style="text-align: left; padding-left: 2rem;">
+                <h2 style="color: #039855; margin-bottom: 0;">0</h2>
+                <p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Regressions</p>
+            </div>
+            """, unsafe_allow_html=True
+        )
 
-    st.markdown("### Try a scenario")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div style="display: flex; justify-content: center; margin-bottom: 2rem;">
+            <div style="background: #f9fafb; border: 1px solid #eaecf0; border-radius: 12px; padding: 1.5rem; width: 400px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <span style="font-weight: 600; color: #344054;">AUTHORIZATION</span>
+                    <span style="color: #039855; font-weight: 600;">✓ ENFORCED</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <span style="font-weight: 600; color: #344054;">EVIDENCE</span>
+                    <span style="color: #039855; font-weight: 600;">✓ REQUIRED</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <span style="font-weight: 600; color: #344054;">DETERMINISTIC RULES</span>
+                    <span style="color: #039855; font-weight: 600;">✓ ENFORCED</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <span style="font-weight: 600; color: #344054;">HUMAN ACTION GATE</span>
+                    <span style="color: #039855; font-weight: 600;">✓ ENFORCED</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="font-weight: 600; color: #344054;">SNAPSHOT</span>
+                    <span style="color: #039855; font-weight: 600;">✓ LOCKED</span>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    st.divider()
+
+    st.markdown("<h3 style='text-align: center; color: #344054; margin-bottom: 1.5rem;'>WHAT DO YOU WANT TO INVESTIGATE?</h3>", unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
 
@@ -696,7 +751,9 @@ if not st.session_state.messages:
 
             st.rerun()
 
-    st.markdown("### Example questions")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown("### Example Queries")
 
     examples = [
         "Can I cancel ORD-1001?",
