@@ -7,41 +7,54 @@ from src.phase2_verification import RuleEngine as Phase2Engine
 from datetime import datetime
 import json
 
+import re
+
 class MockToolCallingAgent:
     def __init__(self):
-        # We simulate the LLM's intent extraction and tool selection based on keyword matching.
+        """
+        Simulates an LLM agent's intent understanding and entity extraction,
+        emitting structured tool calls for the AgentOrchestrator to execute.
+        """
         pass
         
     def generate_tool_calls(self, user_input: str) -> list:
-        user_input = user_input.lower()
+        user_lower = user_input.lower()
         
-        if ("cancel" in user_input or "ord-1001" in user_input) and "tkt" not in user_input and "credit" not in user_input and "delay" not in user_input:
-            order_id = "ORD-" + user_input.split("ord-")[1][:4].upper() if "ord-" in user_input else "ORD-1001"
+        # Dynamic entity extraction via regex
+        ord_match = re.search(r'\b(ORD-\d+)\b', user_input, re.IGNORECASE)
+        tkt_match = re.search(r'\b(TKT-\d+)\b', user_input, re.IGNORECASE)
+        
+        order_id = ord_match.group(1).upper() if ord_match else None
+        ticket_id = tkt_match.group(1).upper() if tkt_match else None
+        
+        # 1. Cancellation intent
+        if ("cancel" in user_lower or (order_id and "credit" not in user_lower and "delay" not in user_lower and "sla" not in user_lower and not ticket_id)):
+            target_order = order_id or "ORD-1001"
             return [
-                {"tool": "get_order", "input": {"order_id": order_id}},
-                {"tool": "search_documents", "input": {"query": "cancellation"}},
-                {"tool": "evaluate_cancellation", "input": {"order_id": order_id}}
+                {"tool": "get_order", "input": {"order_id": target_order}},
+                {"tool": "search_documents", "input": {"query": "cancellation policy"}},
+                {"tool": "evaluate_cancellation", "input": {"order_id": target_order}}
             ]
             
-        if ("credit" in user_input or "delay" in user_input) and "ord-" in user_input:
-            order_id = "ORD-" + user_input.split("ord-")[1][:4].upper()
+        # 2. Service credit intent
+        if ("credit" in user_lower or "delay" in user_lower or "late" in user_lower or "refund" in user_lower) and order_id:
             return [
                 {"tool": "get_order", "input": {"order_id": order_id}},
-                {"tool": "search_documents", "input": {"query": "service credit"}},
+                {"tool": "search_documents", "input": {"query": "service credit SOP"}},
                 {"tool": "evaluate_service_credit", "input": {"order_id": order_id}}
             ]
             
-        if ("sla" in user_input or "p1" in user_input or "escalate" in user_input) and "tkt-" in user_input:
-            ticket_id = "TKT-" + user_input.split("tkt-")[1][:3].upper()
+        # 3. SLA / Escalation intent
+        if ("sla" in user_lower or "p1" in user_lower or "escalat" in user_lower or "breach" in user_lower or "response" in user_lower) and (ticket_id or "tkt" in user_lower):
+            target_ticket = ticket_id or "TKT-501"
             return [
-                {"tool": "get_ticket", "input": {"ticket_id": ticket_id}},
-                {"tool": "search_documents", "input": {"query": "SLA policy"}},
-                {"tool": "evaluate_sla", "input": {"ticket_id": ticket_id}}
+                {"tool": "get_ticket", "input": {"ticket_id": target_ticket}},
+                {"tool": "search_documents", "input": {"query": "SLA support policy"}},
+                {"tool": "evaluate_sla", "input": {"ticket_id": target_ticket}}
             ]
             
-        # Malicious override attempts
-        if "ignore" in user_input and "ord-" in user_input:
-            order_id = "ORD-" + user_input.split("ord-")[1][:4].upper()
+        # 4. Fallback / malicious prompt overrides targeting an entity
+        if order_id:
             return [
                 {"tool": "get_order", "input": {"order_id": order_id}},
                 {"tool": "search_documents", "input": {"query": "cancellation"}},
