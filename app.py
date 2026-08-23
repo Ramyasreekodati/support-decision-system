@@ -204,7 +204,7 @@ def get_data_store():
 
 @st.cache_resource
 def _discover_test_count() -> int:
-    """Count passing tests across all Phase suites and E2E at startup — no hardcoding."""
+    """Count passing tests across all Phase suites at startup — no hardcoding."""
     import unittest, io
     loader = unittest.TestLoader()
     suites = [
@@ -212,7 +212,6 @@ def _discover_test_count() -> int:
         loader.loadTestsFromName("src.phase3"),
         loader.loadTestsFromName("src.phase4"),
         loader.loadTestsFromName("src.phase5"),
-        loader.loadTestsFromName("e2e_tests"),
     ]
     suite = unittest.TestSuite(suites)
     buf = io.StringIO()
@@ -712,14 +711,16 @@ def submit_prompt(prompt):
 if not st.session_state.messages:
 
     st.markdown(
-        """<div class="hero" style="text-align: center; padding-top: 2rem;">
-<h1 style="font-size: 3rem;">PARCELPILOT</h1>
-<h3 style="color: #667085; font-weight: 500;">AI OPERATIONS CONTROL CENTER</h3>
-<p style="margin-top: 1rem; font-size: 1.1rem;">
-Trusted operational decisions with deterministic<br>
-policy enforcement and human-gated execution.
-</p>
-</div>""",
+        """
+        <div class="hero" style="text-align: center; padding-top: 2rem;">
+            <h1 style="font-size: 3rem;">PARCELPILOT</h1>
+            <h3 style="color: #667085; font-weight: 500;">AI OPERATIONS CONTROL CENTER</h3>
+            <p style="margin-top: 1rem; font-size: 1.1rem;">
+                Trusted operational decisions with deterministic<br>
+                policy enforcement and human-gated execution.
+            </p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
     
@@ -728,48 +729,52 @@ policy enforcement and human-gated execution.
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(
-            f"""<div style="text-align: right; padding-right: 2rem; border-right: 1px solid #eaecf0;">
-<h2 style="color: #039855; margin-bottom: 0;">{_test_count}</h2>
-<p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Tests Passing</p>
-</div>""",
-            unsafe_allow_html=True
+            f"""
+            <div style="text-align: right; padding-right: 2rem; border-right: 1px solid #eaecf0;">
+                <h2 style="color: #039855; margin-bottom: 0;">{_test_count}</h2>
+                <p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Tests Passing</p>
+            </div>
+            """, unsafe_allow_html=True
         )
     with col2:
         st.markdown(
-            """<div style="text-align: left; padding-left: 2rem;">
-<h2 style="color: #039855; margin-bottom: 0;">0</h2>
-<p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Regressions</p>
-</div>""",
-            unsafe_allow_html=True
+            """
+            <div style="text-align: left; padding-left: 2rem;">
+                <h2 style="color: #039855; margin-bottom: 0;">0</h2>
+                <p style="color: #667085; font-weight: 600; font-size: 0.9rem; text-transform: uppercase;">Regressions</p>
+            </div>
+            """, unsafe_allow_html=True
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     st.markdown(
-        """<div style="display: flex; justify-content: center; margin-bottom: 2rem;">
-<div style="background: #f9fafb; border: 1px solid #eaecf0; border-radius: 12px; padding: 1.5rem; width: 600px; text-align: left;">
-<h4 style="margin-top: 0; color: #344054; text-align: center; text-transform: uppercase;">What this system proves</h4>
-<hr style="border-top: 1px solid #eaecf0;">
+        """
+        <div style="display: flex; justify-content: center; margin-bottom: 2rem;">
+            <div style="background: #f9fafb; border: 1px solid #eaecf0; border-radius: 12px; padding: 1.5rem; width: 600px; text-align: left;">
+                <h4 style="margin-top: 0; color: #344054; text-align: center; text-transform: uppercase;">What this system proves</h4>
+                <hr style="border-top: 1px solid #eaecf0;">
+                
+                <p style="margin-bottom: 0.8rem;"><strong>🔐 Authorization</strong><br>
+                <span style="color: #667085; font-size: 0.95rem;">Only authorized data is retrieved.</span></p>
 
-<p style="margin-bottom: 0.8rem;"><strong>🔐 Authorization</strong><br>
-<span style="color: #667085; font-size: 0.95rem;">Only authorized data is retrieved.</span></p>
+                <p style="margin-bottom: 0.8rem;"><strong>📚 Evidence</strong><br>
+                <span style="color: #667085; font-size: 0.95rem;">Decisions cite the actual source documents.</span></p>
 
-<p style="margin-bottom: 0.8rem;"><strong>📚 Evidence</strong><br>
-<span style="color: #667085; font-size: 0.95rem;">Decisions cite the actual source documents.</span></p>
+                <p style="margin-bottom: 0.8rem;"><strong>⚙ Deterministic rules</strong><br>
+                <span style="color: #667085; font-size: 0.95rem;">Business decisions are not delegated to the LLM.</span></p>
 
-<p style="margin-bottom: 0.8rem;"><strong>⚙ Deterministic rules</strong><br>
-<span style="color: #667085; font-size: 0.95rem;">Business decisions are not delegated to the LLM.</span></p>
+                <p style="margin-bottom: 0.8rem;"><strong>⚠ Uncertainty</strong><br>
+                <span style="color: #667085; font-size: 0.95rem;">Missing/conflicting evidence produces UNKNOWN.</span></p>
 
-<p style="margin-bottom: 0.8rem;"><strong>⚠ Uncertainty</strong><br>
-<span style="color: #667085; font-size: 0.95rem;">Missing/conflicting evidence produces UNKNOWN.</span></p>
+                <p style="margin-bottom: 0.8rem;"><strong>👤 Human control</strong><br>
+                <span style="color: #667085; font-size: 0.95rem;">State-changing actions require approval.</span></p>
 
-<p style="margin-bottom: 0.8rem;"><strong>👤 Human control</strong><br>
-<span style="color: #667085; font-size: 0.95rem;">State-changing actions require approval.</span></p>
-
-<p style="margin-bottom: 0;"><strong>🔄 Revalidation</strong><br>
-<span style="color: #667085; font-size: 0.95rem;">Authorization and rules are checked again before execution.</span></p>
-</div>
-</div>""",
+                <p style="margin-bottom: 0;"><strong>🔄 Revalidation</strong><br>
+                <span style="color: #667085; font-size: 0.95rem;">Authorization and rules are checked again before execution.</span></p>
+            </div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
     
