@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import pathlib
 
 # Ensure repository root is in Python sys.path for Streamlit Cloud deployment
@@ -146,15 +146,10 @@ active_history = st.session_state.chat_histories[context_key]
 st.sidebar.divider()
 
 st.sidebar.markdown("### 🤖 Agent Engine Mode")
-
-custom_api_key = st.sidebar.text_input("🔑 Gemini API Key (Optional)", type="password", help="Paste your Gemini API key to activate live LLM agent")
-if custom_api_key:
-    agent_service.set_api_key(custom_api_key)
-
 if agent_service.is_live_mode:
     st.sidebar.success("🟢 **LIVE AGENT** — Gemini Tool Calling")
 else:
-    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**\n\n*Deterministic fixture (add key above for live LLM)*")
+    st.sidebar.warning("⚙️ **OFFLINE TEST ENGINE**\n\n*Deterministic fixture*")
 
 st.sidebar.divider()
 

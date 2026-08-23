@@ -5,8 +5,24 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import requests
+import pathlib
 
 logger = logging.getLogger(__name__)
+
+# Auto-load local .env file if present
+env_path = pathlib.Path(__file__).resolve().parent.parent.parent / ".env"
+if env_path.exists():
+    try:
+        with open(env_path, "r", encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    val = v.strip().strip("\"'")
+                    if val:
+                        os.environ[k.strip()] = val
+    except Exception:
+        pass
 
 @dataclass
 class ToolCall:
