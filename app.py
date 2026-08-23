@@ -1,6 +1,10 @@
 import pathlib
+import sys
 import streamlit as st
 from datetime import datetime
+
+# Add src to sys.path so internal imports (e.g. from phase4) resolve correctly
+sys.path.append(str(pathlib.Path(__file__).resolve().parent / "src"))
 
 # Import backend orchestrator and models
 from src.phase4 import SecurityContext, DocumentStore, OperationalDataStore, ActionGateway, IST
