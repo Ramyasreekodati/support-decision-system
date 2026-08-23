@@ -1,43 +1,79 @@
 # Architecture Note: ParcelPilot Support System
 
-## The Problem
-Support agents spend significant time answering policy questions and calculating service credits across various enterprise agreements. While LLMs excel at intent extraction and communication, they struggle with strict deterministic arithmetic, enterprise access controls, and legally binding document precedence.
+## 1. Problem Context
+B2B logistics support teams handle high-stakes customer inquiries involving strict contract terms, SLA breaches, and monetary credits. While LLMs are adept at natural-language understanding, relying on an unconstrained LLM for enterprise calculations or policy enforcement introduces risks of hallucinations, prompt injections, and compliance failures.
 
-## Design Principles
-This architecture operates on a core tenet: **The LLM determines what needs to be investigated; deterministic components determine what the trusted evidence means.**
+## 2. Core Architectural Philosophy
+Our architecture enforces strict separation of concerns:
+> **The LLM decides *what to investigate* (tool selection and argument parsing); deterministic, auditable components decide *what the evidence means* (policy rules, data queries, and actions).**
 
-## Source Precedence
-When an enterprise agreement (e.g., Northstar) overrides standard operating procedures (e.g., General Cancellation SOP), the deterministic engine strictly enforces the override. The LLM cannot hallucinate terms or ignore explicit overrides because it is never given raw control over policy evaluation.
+```
+User Prompt (Natural Language)
+               │
+               ▼
+┌──────────────────────────────────────────────┐
+│        MockToolCallingAgent (Phase 5)        │
+│  - Extracts Intent                           │
+│  - Extracts Entities (e.g. ORD-1001, TKT-501)│
+│  - Selects Sequential Tool Pipeline          │
+└──────────────────────┬───────────────────────┘
+                       │
+       ┌───────────────┼───────────────┐
+       ▼               ▼               ▼
+┌──────────────┐┌──────────────┐┌──────────────┐
+│ Structured   ││ Document     ││ Rule Engines │
+│ Data Store   ││ Store (Docs) ││ (Phases 2-4) │
+│ - get_order  ││ - search_docs││ - evaluate_* │
+│ - get_ticket ││              ││              │
+└──────────────┘└──────────────┘└──────┬───────┘
+                                       │ (if escalation required)
+                                       ▼
+                       ┌───────────────────────────────┐
+                       │     Action Gateway (Phase 4)  │
+                       │ 1. PREPARE Action             │
+                       │ 2. AWAIT Human Confirmation   │
+                       │ 3. REVALIDATE (Auth/Rule/Hash)│
+                       │ 4. EXECUTE & Log Audit Trail  │
+                       └───────────────────────────────┘
+```
 
-## Security Model
-The system enforces rigorous, multi-layered authorization:
-- **Customer:** Restricted to their exact account scope (e.g., LumenWorks).
-- **Support Agent:** Restricted to explicitly assigned accounts.
-- **Support Admin:** Authorized for ALL scopes.
-The UI merely mocks the identity token. All true validation occurs cryptographically within the `OperationalDataStore` and `ActionGateway`, ensuring that prompt injection cannot bypass tenant isolation.
+## 3. Agent & Tool Design (7 Distinct Tools)
+1. `get_order`: Queries order facts (order status, timestamps, fees, fault flags) from `OperationalDataStore`.
+2. `get_ticket`: Queries support tickets (account, priority, created time, response time).
+3. `search_documents`: Retrieves current, non-deprecated policies and agreements from `DocumentStore`.
+4. `evaluate_cancellation`: Deterministic engine for cancellation eligibility and fees.
+5. `evaluate_service_credit`: Deterministic engine for delay calculation and credit limits.
+6. `evaluate_sla`: Timezone-aware engine for SLA response deadlines and breach verification.
+7. `prepare_escalation`: Creates idempotent, human-gated escalation proposals.
 
-## Deterministic Rule Engine
-Complex calculations—such as cancellation fees, SLA response targets, and service credit eligibility—are executed entirely via Python-based Rule Engines. The LLM passes raw operational facts to these engines, and the engines return a structured decision payload.
+## 4. Document Hierarchy & Source Precedence
+When an enterprise agreement contradicts a standard policy, the deterministic engine enforces strict legal hierarchy:
+$$\text{Customer Agreement (Enterprise Tier)} > \text{General SOP v4} > \text{Deprecated Policies (Filtered)}$$
+Every decision explicitly tags the evidence source and authority level (`CUSTOMER_SPECIFIC` vs `GENERAL_POLICY`).
 
-## Retrieval Model
-A `DocumentStore` securely retrieves PDFs based on the user's role and account context. It additionally filters out deprecated documents based on the `snapshot_time`, ensuring the LLM is only exposed to current, active policies.
+## 5. Security & Access Control
+Access control is enforced **strictly at the data and tool layer**, not via model prompts:
+- `is_authorized(context, account_id)` validates tenant isolation before returning order/ticket data.
+- Unauthorized cross-account access immediately raises `PermissionError`, terminating the tool chain before business rules run or data is exposed.
 
-## LLM Responsibilities
-1. Extract intent from the user query (e.g., "Cancel order 1001" -> `type: CANCELLATION`).
-2. Synthesize the structured output of the deterministic engines into a conversational format.
+## 6. Action Lifecycle & Human-in-the-Loop
+No state-changing mutation can occur autonomously. The lifecycle requires:
+1. **PREPARE:** Action created in `ActionState.PREPARED` with a unique ID and payload hash.
+2. **CONFIRM:** Human agent reviews the proposed action in the UI.
+3. **REVALIDATE:** Live 4-point verification before execution:
+   - Authorization (active `SecurityContext`)
+   - Record Access (entity existence)
+   - Rule State (re-evaluation of breach condition)
+   - Payload Integrity (tampering check)
+4. **EXECUTE:** Transitions to `EXECUTED` and appends to the immutable execution ledger. Duplicate calls return `ALREADY_EXECUTED` (idempotent).
 
-## Action Lifecycle
-The LLM cannot mutate state directly. Instead, it prepares actions in an idempotent sandbox.
-1. **PREPARE:** The LLM requests an escalation.
-2. **CONFIRM:** A human user manually reviews the request via the UI.
-3. **REVALIDATE:** The backend revalidates the exact action payload against the user's current security context (preventing mid-flight authorization tampering).
-4. **EXECUTE:** The action is finalized.
+## 7. Dynamic Reference Time
+The system dynamically extracts the reference snapshot time from row 1 of the Excel `README` sheet (`2026-08-16 11:00 Asia/Kolkata`), eliminating static date assumptions.
 
-## Uncertainty Handling
-The system does not fabricate missing data. If an order lacks an actual pickup time, the decision yields `UNKNOWN` and explicitly notes the limitation. If an SLA deadline has passed but a `first_response_at` timestamp is missing, it yields `DEADLINE_ELAPSED` instead of a verified `BREACHED`. 
-
-## Testing Strategy
-The architecture was verified using an adversarial `MockLLM` that intentionally attempted prompt injections, hallucinated calculations, ignored scopes, and manipulated states. 48 deterministic unit tests and 8 E2E simulation tests prove that the boundaries hold under attack.
-
-## Trade-offs
-To achieve absolute deterministic reliability, we traded away free-form LLM flexibility. The LLM must conform to the strict JSON constraints expected by the Action Gateway, meaning it cannot creatively devise custom workflows that haven't been engineered into the Rule Engine yet.
+## 8. Verification & Testing
+51 automated test cases verify every boundary:
+- Phase 2 (17 tests): Cancellation rules, override precedence, missing agreement handling.
+- Phase 3 (13 tests): Service credits, fault conflicts, missing pickup times.
+- Phase 4 (11 tests): SLA deadlines, ActionGateway lifecycle, security revalidation.
+- Phase 5 (2 tests): Agent tool selection, multi-tool pipelines, injection resistance.
+- E2E (8 tests): End-to-end user workflows and human approval flows.
