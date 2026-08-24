@@ -358,10 +358,61 @@ During development, AI pair programming was used for:
 
 ---
 
-## 26. Demo / Screenshots
-* **Interactive Support Chat:** Real-time conversational interface with decision cards and citation badges.
-* **Human-in-the-Loop Action Card:** Interactive amber approval card for staging ticket updates and escalations.
-* **Proactive Operations Dashboard:** Real-time SLA risk matrix and known-issue clustering interface.
+## 26. Demo / Screenshots / notes
+## My Notes
+[ View My Notes](https://drive.google.com/file/d/1Wtq3CFoyQO01Fo2v5K9f2WXWzeQfN-Hs/view?usp=sharing)
+
+
+[ Demo vedio ](https://drive.google.com/file/d/1-qwsc06MwbGhUM4Dqn441mY1YOdoIiaW/view?usp=sharing)
+
+
+[ Demo app ] (https://support-decision-system.streamlit.app/ ) 
+
+
+<img width="1897" height="922" alt="image" src="https://github.com/user-attachments/assets/2346b898-5573-465f-9eca-0a319949c4ac" />
+
+"Let's test our first core capability: resolving conflicting sources and contractual legal precedence.
+
+Standard SOP v4 dictates that canceling a shipment more than 30 minutes after booking incurs a ₹250 fee. Here, order ORD-1001 was booked 75 minutes ago.
+
+Notice what the agent does: It looks up the order facts with get_order, searches policies with search_documents, and evaluates the rules. It detects that Northstar has an Enterprise Agreement that waives all cancellation fees for BOOKED shipments prior to dispatch.
+
+The UI returns Decision: CANCELLATION_ALLOWED with a ₹0 fee, explicitly displaying the purple Customer Agreement (Override) citation badge next to the General SOP badge. The math is computed deterministically, not guessed by the model."
+
+<img width="1917" height="967" alt="image" src="https://github.com/user-attachments/assets/2813f52b-baaf-4d43-a843-63baf8fed359" />
+
+"Next: What happens when operational data is incomplete or ambiguous? A reliable AI agent must know when NOT to answer.
+
+For order ORD-2001, carrier fault was reported, but the actual pickup time field is blank in the database. General SOP v4 strictly forbids promising a credit when pickup timing is unrecorded.
+
+Instead of hallucinating or assuming a credit, the agent outputs Decision: ⚠️ UNKNOWN and surfaces an explicit Operational Limitations banner explaining that pickup_actual_at is missing. This completely eliminates false promises to customers."
+
+<img width="1557" height="882" alt="image" src="https://github.com/user-attachments/assets/aa5beabf-3b4f-4572-8039-dda77be8881f" />
+
+"Now let's examine Action Governance and SLA Tracking.
+
+Evaluating ticket TKT-501 against our dataset snapshot time (16 Aug 2026 11:00 IST), the agent detects that the 15-minute P1 response deadline has elapsed. The decision is flagged as 🚨 DEADLINE_ELAPSED.
+
+Crucially, the agent is never allowed to mutate backend state autonomously. Instead, it stages a proposal via our ActionGateway and renders this amber human review card.
+
+When I click 'Approve & Execute', the gateway performs a live 4-point cryptographic revalidation—checking user authorization, record access, business rule validity, and a SHA256 payload integrity hash. Only when all four pass is the ticket state updated."
+
+<img width="1212" height="772" alt="image" src="https://github.com/user-attachments/assets/4285b8f3-22f5-49e5-8708-529fd76beba6" />
+
+"Security and multi-tenant isolation are paramount. Let's switch our persona to a Customer scoped exclusively to LumenWorks (ACCT-002) and attempt to query Northstar's order ORD-1001.
+
+Immediately, the system renders a 🛑 Access Denied card. Security is enforced directly at the data store layer via is_authorized() before any documents are retrieved or prompts are sent to the LLM. Furthermore, switching accounts isolates conversation histories in Streamlit so no cross-tenant chats leak."
+
+<img width="1887" height="556" alt="image" src="https://github.com/user-attachments/assets/c8e4f44f-fc0a-4219-9577-2adcebac6851" />
+
+"Now, let's look at Problem 1: Proactive Issue Detection.
+
+Moving to Tab 2, our ProactiveEngine continuously monitors the entire queue relative to the snapshot time:
+
+The Real-Time SLA Risk Watchlist highlights breached and at-risk tickets like TKT-501 with real-time countdown metrics.
+The Known Issue Clustering Engine groups related incoming tickets around root-cause defects—such as KI-208 for Bulk CSV upload failures and KI-211 for SwiftShip driver status delays—providing operations teams with immediate recommended remediation steps before customers escalate."
+
+<img width="1640" height="891" alt="image" src="https://github.com/user-attachments/assets/d300fe34-9087-4136-93e1-a970c7698978" />
 
 ---
 
